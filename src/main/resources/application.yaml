@@ -1,0 +1,14 @@
+spring:
+  application:
+    name: bot
+
+binance:
+  restBaseUrl: https://fapi.binance.com
+  wsBaseUrl: wss://fstream.binance.com/ws
+
+  apiKey: WghAR9Rg17OJ9o8AKU31oT3SqQPK4C2CNHEp6LSBkdiAjwTiIxXD0g0HK7e2aRKu
+  secretKey: 3mwYmwlgp3inM45o5dO1lxzK224HE7bOMh2Ra4vyG3sXNlO8rwiHtztfPb0RUzkE
+
+trading:
+  stopLimit: 2
+  winLimit: 1.5
