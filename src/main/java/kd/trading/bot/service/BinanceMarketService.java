@@ -8,8 +8,6 @@ import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.EnableScheduling;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
@@ -22,6 +20,7 @@ import java.net.URISyntaxException;
 public class BinanceMarketService {
     BinanceListenKeyService listenKeyService;
     BinanceConfig config;
+    BinanceHistoryService historyService;
 
     @PostConstruct
     private void run() throws URISyntaxException {
@@ -33,8 +32,9 @@ public class BinanceMarketService {
          * 24 hr rolling window ticker statistics for all symbols. These are NOT the statistics of the UTC day, but a 24hr
          * rolling window from requestTime to 24hrs before. Note that only tickers that have changed will be present in the array.
          */
+
         String wsUrlMain = "wss://fstream.binance.com/ws/!ticker@arr";
-        BinanceMarketWebSocketClient client = new BinanceMarketWebSocketClient(new URI(wsUrlMain));
+        BinanceMarketWebSocketClient client = new BinanceMarketWebSocketClient(new URI(wsUrlMain), historyService);
         client.connect();
     }
 

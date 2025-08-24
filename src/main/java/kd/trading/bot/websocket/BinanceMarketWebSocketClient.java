@@ -3,6 +3,7 @@ package kd.trading.bot.websocket;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import kd.trading.bot.model.BinanceTickerData;
+import kd.trading.bot.service.BinanceHistoryService;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.experimental.FieldDefaults;
@@ -15,13 +16,16 @@ import java.util.List;
 
 @FieldDefaults(level = AccessLevel.PRIVATE)
 @Slf4j
+
 public class BinanceMarketWebSocketClient extends WebSocketClient {
     static final long INTERVAL_MS = 60_000; // 30 seconds
     long lastProcessed = 0;
     List<BinanceTickerData> tickers;
+    BinanceHistoryService binanceHistoryService;
 
-    public BinanceMarketWebSocketClient(URI serverUri) {
+    public BinanceMarketWebSocketClient(URI serverUri, BinanceHistoryService binanceHistoryService) {
         super(serverUri);
+        this.binanceHistoryService = binanceHistoryService;
     }
 
     @Override
@@ -44,9 +48,19 @@ public class BinanceMarketWebSocketClient extends WebSocketClient {
         } catch (Exception e) {
             log.error("Failed to parse 24h ticker array: {}", message, e);
         }
+
         //2. fázis
         if (now - lastProcessed >= INTERVAL_MS) {
-            System.out.println("teszt");
+            for (BinanceTickerData ticker : tickers) {
+                double ath = binanceHistoryService.getATH(ticker.symbol());
+                double lastPrice = ticker.lastPrice();
+
+                if (lastPrice >= ath) {
+                    log.info("Skipping {} (lastPrice={} at ATH={})", ticker.symbol(), lastPrice, ath);
+                } else {
+                    log.info("Candidate: {} (lastPrice={}, ATH={})", ticker.symbol(), lastPrice, ath);
+                }
+            }
             lastProcessed = now;
         }
     }
