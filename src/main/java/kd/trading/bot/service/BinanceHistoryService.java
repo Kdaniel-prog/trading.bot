@@ -23,7 +23,6 @@ public class BinanceHistoryService {
                 .max()
                 .orElse(0.0);
 
-        log.info("ATH for {} = {}", symbol, ath);
         return ath;
     }
 }

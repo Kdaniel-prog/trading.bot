@@ -21,6 +21,7 @@ public class BinanceMarketService {
     BinanceListenKeyService listenKeyService;
     BinanceConfig config;
     BinanceHistoryService historyService;
+    AlgorithmService algorithmService;
 
     @PostConstruct
     private void run() throws URISyntaxException {
@@ -34,7 +35,7 @@ public class BinanceMarketService {
          */
 
         String wsUrlMain = "wss://fstream.binance.com/ws/!ticker@arr";
-        BinanceMarketWebSocketClient client = new BinanceMarketWebSocketClient(new URI(wsUrlMain), historyService);
+        BinanceMarketWebSocketClient client = new BinanceMarketWebSocketClient(new URI(wsUrlMain), historyService, algorithmService);
         client.connect();
     }
 
