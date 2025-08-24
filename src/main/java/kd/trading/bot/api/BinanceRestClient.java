@@ -19,7 +19,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.Map;
 
 @Slf4j
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
@@ -55,22 +54,28 @@ public class BinanceRestClient {
         client.send(request, HttpResponse.BodyHandlers.ofString());
     }
 
-    /**
-     * Get all 24h ticker statistics (Futures)
-     */
-    public List<Map<String, Object>> tickers24h() throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(config.restBaseUrl() + "/fapi/v1/ticker/24hr"))
-                .GET()
-                .build();
+    public List<List<Object>> getKlines(String symbol, String interval, int limit) {
+        try {
+            String url = String.format("%s/fapi/v1/klines?symbol=%s&interval=%s&limit=%d",
+                    config.restBaseUrl(), symbol, interval, limit);
 
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .GET()
+                    .build();
 
-        // Parse JSON array into List<Map<String,Object>>
-        ObjectMapper mapper = new ObjectMapper();
-        return mapper.readValue(response.body(), new TypeReference<List<Map<String,Object>>>() {});
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            // Binance Klines = List<List<Object>>
+            return mapper.readValue(response.body(), new TypeReference<>() {});
+        } catch (IOException | InterruptedException e) {
+            log.error("Failed to fetch klines for {}", symbol, e);
+            return List.of();
+        } catch (Exception e) {
+            log.error("Unexpected error while fetching klines for {}", symbol, e);
+            return List.of();
+        }
     }
-
 
     private String sign(String data) {
         try {
