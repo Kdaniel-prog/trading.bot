@@ -1,4 +1,4 @@
-package kd.trading.bot.config;
+package kd.trading.bot.config.binance;
 
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.context.annotation.Bean;

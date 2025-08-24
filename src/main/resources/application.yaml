@@ -12,3 +12,4 @@ binance:
 trading:
   stopLimit: 2
   winLimit: 1.5
+  tradeWithPercent: 0.2

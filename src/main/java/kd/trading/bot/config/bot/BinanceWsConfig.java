@@ -1,6 +1,8 @@
-package kd.trading.bot.config;
+package kd.trading.bot.config.bot;
 
-import kd.trading.bot.service.BinanceListenKeyService;
+import kd.trading.bot.config.binance.BinanceConfig;
+import kd.trading.bot.listenKey.BinanceListenKeyService;
+import kd.trading.bot.listenKey.BinanceListenerKey;
 import kd.trading.bot.websocket.BinanceWebSocketClient;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
@@ -22,10 +24,10 @@ public class BinanceWsConfig {
     @Bean
     public BinanceWebSocketClient binanceWebSocketClient() throws Exception {
         // 1. listenKey létrehozása
-        String listenKey = listenKeyService.createListenKey();
-
+        listenKeyService.createListenKey();
+        System.out.println("hello world");
         // 2. WS URL összeállítása
-        String wsUrl = config.wsBaseUrl() + "/" + listenKey;
+        String wsUrl = config.wsBaseUrl() + "/" + BinanceListenerKey.getInstance("").listenerKey;
 
         // 3. WebSocket kliens példányosítása és visszaadása
         BinanceWebSocketClient client = new BinanceWebSocketClient(new URI(wsUrl));

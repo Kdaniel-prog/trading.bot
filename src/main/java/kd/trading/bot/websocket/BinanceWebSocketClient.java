@@ -5,10 +5,10 @@ import org.java_websocket.client.WebSocketClient;
 import org.java_websocket.handshake.ServerHandshake;
 
 import java.net.URI;
+
 /**
  * Üzenet kezelés
  */
-
 @Slf4j
 public class BinanceWebSocketClient extends WebSocketClient {
 
@@ -17,7 +17,7 @@ public class BinanceWebSocketClient extends WebSocketClient {
     }
 
     @Override
-    public void onOpen(ServerHandshake handshakedata) {
+    public void onOpen(ServerHandshake handshakeData) {
         log.info("Connected to Binance Futures WebSocket");
     }
 
