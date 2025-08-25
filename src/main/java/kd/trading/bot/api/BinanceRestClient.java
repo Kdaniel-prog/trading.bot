@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import kd.trading.bot.config.binance.BinanceConfig;
+import kd.trading.bot.model.ExchangeInfo;
+import kd.trading.bot.model.SymbolInfo;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.experimental.FieldDefaults;
@@ -17,6 +19,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
 
@@ -37,8 +40,6 @@ public class BinanceRestClient {
                 .build();
 
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-
-        log.info("ListenKey Response: {}", response.body());
 
         JsonNode node = mapper.readTree(response.body());
         return node.get("listenKey").asText();
@@ -73,6 +74,38 @@ public class BinanceRestClient {
             return List.of();
         } catch (Exception e) {
             log.error("Unexpected error while fetching klines for {}", symbol, e);
+            return List.of();
+        }
+    }
+
+    public List<SymbolInfo> getTradableSymbols() {
+        try {
+            String url = config.restBaseUrl() + "/fapi/v1/exchangeInfo";
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .GET()
+                    .build();
+
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            ExchangeInfo exchangeInfo = mapper.readValue(response.body(), ExchangeInfo.class);
+
+            if (exchangeInfo == null || exchangeInfo.getSymbols() == null) {
+                throw new RuntimeException("Exchange info not available");
+            }
+
+            // cutoff dátum = most - 120 nap
+            Instant cutoff = Instant.now().minus(120, java.time.temporal.ChronoUnit.DAYS);
+
+            return exchangeInfo.getSymbols().stream()
+                    .filter(s -> "TRADING".equals(s.getStatus()))
+                    .filter(s -> "USDT".equals(s.getQuoteAsset()))
+                    .filter(s -> Instant.ofEpochMilli(s.getOnboardDate()).isBefore(cutoff)) // 4 hónap filter
+                    .toList();
+
+        } catch (Exception e) {
+            log.error("Failed to fetch exchangeInfo", e);
             return List.of();
         }
     }
