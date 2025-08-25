@@ -24,7 +24,7 @@ import java.util.concurrent.*;
 public class BinanceMarketWebSocketClient extends WebSocketClient {
 
     // 180_000 ms = 3 perc (a korábbi komment 30 mp volt, de az 30_000)
-    static final long INTERVAL_MS = 180_000;
+    static final long INTERVAL_MS = 600_000;
 
     // Elemzésre vett tickerek max száma (prefilter): csökkentsd/emeld igény szerint
     static final int MAX_CANDIDATES = 60;
@@ -76,6 +76,8 @@ public class BinanceMarketWebSocketClient extends WebSocketClient {
         analysisPool.submit(() -> {
             try {
                 // 1️⃣ Prefilter: top 60 by quoteVolume
+                // quoteVolume = adott pár teljes kereskedési volumene a jegyző (quote) devizában
+                // (pl. BTCUSDT esetén USDT-ben számolva). Így az 50-60 legnagyobb forgalmú coin kerül be.
                 List<BinanceTickerData> candidates = incomingTickers.stream()
                         .sorted(Comparator.comparingDouble(BinanceTickerData::getQuoteVolume).reversed())
                         .limit(60)
@@ -105,16 +107,31 @@ public class BinanceMarketWebSocketClient extends WebSocketClient {
                         .filter(t -> !Double.isInfinite(t.getScore()))
                         .toList();
 
-                // 4️⃣ Top 5 kiválasztás
-                List<BinanceTickerData> topCoins = analyzed.stream()
-                        .sorted((a, b) -> Double.compare(b.getScore(), a.getScore()))
-                        .limit(5)
+                // 4️⃣ Top 5 és Bottom 5 egyszerre
+                List<BinanceTickerData> sorted = analyzed.stream()
+                        .sorted((a, b) -> Double.compare(b.getScore(), a.getScore())) // csökkenő sorrend
+                        .toList();
+
+                List<BinanceTickerData> topCoins = sorted.stream().limit(5).toList();
+                List<BinanceTickerData> bottomCoins = sorted.stream()
+                        .skip(Math.max(sorted.size() - 5, 0)) // utolsó 5 elem
                         .toList();
 
                 // 5️⃣ Log
+                log.info("=== TOP 5 COINS ===");
                 topCoins.forEach(c ->
-                        log.info("TOP: {} | Score: {} | Signal: {}", c.getSymbol(),
-                                String.format("%.2f", c.getScore()), c.getSignal())
+                        log.info("{} | Score: {} | Signal: {}",
+                                c.getSymbol(),
+                                String.format("%.2f", c.getScore()),
+                                c.getSignal())
+                );
+
+                log.info("=== BOTTOM 5 COINS ===");
+                bottomCoins.forEach(c ->
+                        log.info("{} | Score: {} | Signal: {}",
+                                c.getSymbol(),
+                                String.format("%.2f", c.getScore()),
+                                c.getSignal())
                 );
 
             } catch (Exception e) {

@@ -16,7 +16,7 @@ import java.util.List;
 public class AlgorithmService {
 
     private final BinanceRestClient restClient;
-
+    //swing trade: lassabb trade 1 naptól 1 hétig tart egy trade.
     public CoinAnalysis analyzeCoin(String symbol) {
         try {
             // 1️⃣ Heti trend (7 napos zárók)
@@ -59,8 +59,8 @@ public class AlgorithmService {
 
             // --- Döntés
             Signal signal;
-            if (score > 20) signal = Signal.LONG;
-            else if (score < -20) signal = Signal.SHORT;
+            if (score > 50) signal = Signal.LONG;
+            else if (score < -25) signal = Signal.SHORT;
             else signal = Signal.NO_TRADE;
 
             // Debug log (opcionális)
