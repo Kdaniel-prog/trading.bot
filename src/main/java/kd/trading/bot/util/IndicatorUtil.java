@@ -1,5 +1,6 @@
 package kd.trading.bot.util;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class IndicatorUtil {
@@ -58,5 +59,30 @@ public class IndicatorUtil {
 
         double rs = avgGain / avgLoss;
         return 100 - (100 / (1 + rs));
+    }
+
+    // MACD: [0] = MACD line, [1] = Signal line, [2] = Histogram
+    public static double[] MACD(List<Double> closes, int fastPeriod, int slowPeriod, int signalPeriod) {
+        if (closes.size() < slowPeriod + signalPeriod) {
+            return new double[] {0.0, 0.0, 0.0};
+        }
+
+        // MACD line = EMA(fast) - EMA(slow)
+        double emaFast = EMA(closes, fastPeriod);
+        double emaSlow = EMA(closes, slowPeriod);
+        double macdLine = emaFast - emaSlow;
+
+        // Signal line: EMA on MACD values
+        List<Double> macdValues = new ArrayList<>();
+        for (int i = slowPeriod; i < closes.size(); i++) {
+            double subEmaFast = EMA(closes.subList(0, i + 1), fastPeriod);
+            double subEmaSlow = EMA(closes.subList(0, i + 1), slowPeriod);
+            macdValues.add(subEmaFast - subEmaSlow);
+        }
+
+        double signalLine = EMA(macdValues, signalPeriod);
+        double histogram = macdLine - signalLine;
+
+        return new double[] {macdLine, signalLine, histogram};
     }
 }

@@ -59,12 +59,6 @@ public class TradingBotService implements MarketDataListener {
 
     @Override
     public void onMarketData(String message) {
-        long now = System.currentTimeMillis();
-        if (now - lastProcessed < INTERVAL_MS) {
-            return; // skip, not 3 minutes yet
-        }
-        lastProcessed = now;
-
         pipelineService.processMessage(message, tradableSymbols);
     }
 }

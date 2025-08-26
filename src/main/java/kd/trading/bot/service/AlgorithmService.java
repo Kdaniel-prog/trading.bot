@@ -17,67 +17,67 @@ public class AlgorithmService {
 
     private final BinanceRestClient restClient;
     //swing trade: lassabb trade 1 naptól 1 hétig tart egy trade.
-    public CoinAnalysis analyzeCoin(String symbol) {
+    public CoinAnalysis analyzeSwingCoin(String symbol) {
         try {
-            // 1️⃣ Heti trend (7 napos zárók)
-            List<List<Object>> weeklyKlines = restClient.getKlines(symbol, "1d", 7);
-            List<Double> weeklyCloses = weeklyKlines.stream()
+            // 1️⃣ Lekérjük a napi gyertyákat (kb. 200 napra vissza)
+            List<List<Object>> dailyKlines = restClient.getKlines(symbol, "1d", 200);
+            List<Double> closes = dailyKlines.stream()
                     .map(k -> Double.parseDouble(k.get(4).toString()))
                     .toList();
 
-            // 2️⃣ Napi trend (24 órás zárók)
-            List<List<Object>> dailyKlines = restClient.getKlines(symbol, "1h", 24);
-            List<Double> dailyCloses = dailyKlines.stream()
-                    .map(k -> Double.parseDouble(k.get(4).toString()))
+            List<Double> volumes = dailyKlines.stream()
+                    .map(k -> Double.parseDouble(k.get(5).toString()))
                     .toList();
 
-            if (weeklyCloses.isEmpty() || dailyCloses.isEmpty()) {
+            if (closes.size() < 200) {
                 return new CoinAnalysis(symbol, 0.0, Signal.NO_TRADE);
             }
 
-            // --- Heti EMA delta normalizálva
-            double weeklyEMA = IndicatorUtil.EMA(weeklyCloses, 7);
-            double lastWeeklyClose = weeklyCloses.get(weeklyCloses.size() - 1);
-            double weeklyDelta = ((lastWeeklyClose - weeklyEMA) / weeklyEMA) * 100;
-            double weeklyScore = Math.max(-10, Math.min(10, weeklyDelta)) * 5; // ±50 pont
+            // 2️⃣ Trend filter: EMA50 vs EMA200
+            double ema50 = IndicatorUtil.EMA(closes, 50);
+            double ema200 = IndicatorUtil.EMA(closes, 200);
+            double lastClose = closes.get(closes.size() - 1);
 
-            // --- Napi EMA delta normalizálva
-            double dailyEMA = IndicatorUtil.EMA(dailyCloses, 24);
-            double lastDailyClose = dailyCloses.get(dailyCloses.size() - 1);
-            double dailyDelta = ((lastDailyClose - dailyEMA) / dailyEMA) * 100;
-            double dailyScore = Math.max(-5, Math.min(5, dailyDelta)) * 6; // ±30 pont
+            boolean bullTrend = ema50 > ema200 && lastClose > ema50;
+            boolean bearTrend = ema50 < ema200 && lastClose < ema50;
 
-            // --- RSI score
-            double rsi = IndicatorUtil.RSI(dailyCloses, 14);
-            double rsiScore;
-            if (rsi > 70) rsiScore = -30;       // túlvett → SHORT
-            else if (rsi < 30) rsiScore = 30;   // túladott → LONG
-            else rsiScore = (50 - rsi) * 0.6;   // ±12 pont középértéknél
+            // 3️⃣ Volume filter: mai volumen vs 20 napos átlag
+            double avgVol20 = volumes.subList(volumes.size() - 20, volumes.size())
+                    .stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
+            double lastVol = volumes.get(volumes.size() - 1);
+            boolean strongVolume = lastVol > 1.5 * avgVol20;
 
-            // --- Összesített score
-            double score = weeklyScore + dailyScore + rsiScore;
+            // 4️⃣ MACD filter (trend megerősítés)
+            double[] macd = IndicatorUtil.MACD(closes, 12, 26, 9);
+            double macdValue = macd[0];
+            double macdSignal = macd[1];
+            boolean macdBull = macdValue > macdSignal && macdValue > 0;
+            boolean macdBear = macdValue < macdSignal && macdValue < 0;
 
-            // --- Döntés
+            // 5️⃣ Döntés
             Signal signal;
-            if (score > 50) signal = Signal.LONG;
-            else if (score < -25) signal = Signal.SHORT;
-            else signal = Signal.NO_TRADE;
+            if (bullTrend && strongVolume && macdBull) {
+                signal = Signal.LONG;
+            } else if (bearTrend && strongVolume && macdBear) {
+                signal = Signal.SHORT;
+            } else {
+                signal = Signal.NO_TRADE;
+            }
 
-            // Debug log (opcionális)
-            log.debug("{} | weeklyScore: {:.2f}, dailyScore: {:.2f}, rsiScore: {:.2f} => score: {:.2f} | signal: {}",
-                    symbol, weeklyScore, dailyScore, rsiScore, score, signal);
+            log.debug("{} | ema50: {:.2f}, ema200: {:.2f}, volCheck: {}, macd: {:.2f}/{:.2f} => signal: {}",
+                    symbol, ema50, ema200, strongVolume, macdValue, macdSignal, signal);
 
-            return new CoinAnalysis(symbol, score, signal);
+            return new CoinAnalysis(symbol, 0.0, signal);
 
         } catch (Exception e) {
-            log.error("Failed to analyze coin {}", symbol, e);
+            log.error("Failed to analyze swing coin {}", symbol, e);
             return new CoinAnalysis(symbol, 0.0, Signal.NO_TRADE);
         }
     }
 
     public List<CoinAnalysis> analyzeTopCoins(List<String> symbols, int topN) {
         return symbols.stream()
-                .map(this::analyzeCoin)
+                .map(this::analyzeSwingCoin)
                 .sorted((a, b) -> Double.compare(b.getScore(), a.getScore()))
                 .limit(topN)
                 .toList();

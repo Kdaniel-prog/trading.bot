@@ -21,6 +21,7 @@ public class MarketDataPipelineService {
     final AthFilterService athFilterService;
     final CoinAnalysisService analysisService;
     final RankingService rankingService;
+    final IndicatorService indicatorService;
 
     @Getter
     volatile RankingService.RankedCoins latestResult = new RankingService.RankedCoins(List.of(), List.of());
@@ -40,7 +41,12 @@ public class MarketDataPipelineService {
             if (athFiltered.isEmpty()) return;
 
             // 4. analysis
-            List<BinanceTickerData> analyzed = analysisService.analyze(athFiltered);
+            List<BinanceTickerData> analyzed = athFiltered.stream()
+                    .map(ticker -> {
+                        IndicatorService.Indicators ind = indicatorService.loadIndicators(ticker.getSymbol());
+                        return analysisService.analyze(ticker, ind.ema50(), ind.ema200(), ind.ath(), ind.rsi());
+                    })
+                    .toList();
             if (analyzed.isEmpty()) return;
 
             // 5. ranking

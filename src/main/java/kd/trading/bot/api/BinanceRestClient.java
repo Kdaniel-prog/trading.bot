@@ -65,11 +65,11 @@ public class BinanceRestClient {
                     .GET()
                     .build();
 
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-
+            HttpResponse<String> response = client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                    .join();
             // Binance Klines = List<List<Object>>
             return mapper.readValue(response.body(), new TypeReference<>() {});
-        } catch (IOException | InterruptedException e) {
+        } catch (IOException e) {
             log.error("Failed to fetch klines for {}", symbol, e);
             return List.of();
         } catch (Exception e) {
