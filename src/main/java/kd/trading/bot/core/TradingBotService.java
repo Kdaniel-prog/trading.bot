@@ -23,15 +23,11 @@ import java.util.Set;
 @Slf4j
 @FieldDefaults(level = AccessLevel.PRIVATE)
 public class TradingBotService implements MarketDataListener {
-
-    static final long INTERVAL_MS = 180_000; // 3 minutes
-
     final BinanceSessionManager sessionManager;
     final TradableSymbolService symbolService;
     final MarketDataPipelineService pipelineService;
 
     private volatile Set<String> tradableSymbols;
-    private volatile long lastProcessed = 0;
 
     @PostConstruct
     private void init() throws URISyntaxException {
