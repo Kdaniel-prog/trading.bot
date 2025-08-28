@@ -10,9 +10,9 @@ binance:
   secretKey: aa5dc12959b2c0205a07f50618fdbe56b7021a68ffe958623338290851138128
 
 
-swing-trading:
-  stopLimit: 0.25
-  winLimit: 0.45
+trading:
+  stopLimit: 0.6
+  winLimit: 0.12
   tradeWithPercent: 0.2
 
 realBinance:

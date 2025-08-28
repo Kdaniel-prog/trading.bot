@@ -1,6 +1,7 @@
 package kd.trading.bot.service;
 
 import kd.trading.bot.model.BinanceTickerData;
+import kd.trading.bot.model.CoinAnalysis;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -19,9 +20,9 @@ public class MarketDataPipelineService {
     final MarketDataParserService parserService;
     final TickerPrefilterService prefilterService;
     final AthFilterService athFilterService;
-    final CoinAnalysisService analysisService;
     final RankingService rankingService;
     final IndicatorService indicatorService;
+    final AlgorithmService algorithmService;
 
     @Getter
     volatile RankingService.RankedCoins latestResult = new RankingService.RankedCoins(List.of(), List.of());
@@ -41,11 +42,8 @@ public class MarketDataPipelineService {
             if (athFiltered.isEmpty()) return;
 
             // 4. analysis
-            List<BinanceTickerData> analyzed = athFiltered.stream()
-                    .map(ticker -> {
-                        IndicatorService.Indicators ind = indicatorService.loadIndicators(ticker.getSymbol());
-                        return analysisService.analyze(ticker, ind.ema50(), ind.ema200(), ind.ath(), ind.rsi());
-                    })
+            List<CoinAnalysis> analyzed = athFiltered.stream()
+                    .map(ticker -> algorithmService.analyzeSwingCoin(ticker.getSymbol(), ticker.getLastPrice()) )
                     .toList();
             if (analyzed.isEmpty()) return;
 

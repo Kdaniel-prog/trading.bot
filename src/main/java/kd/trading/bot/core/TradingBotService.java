@@ -1,12 +1,16 @@
 package kd.trading.bot.core;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
+import kd.trading.bot.api.BinanceRestClient;
+import kd.trading.bot.config.binance.BinanceConfig;
+import kd.trading.bot.config.trading.TradingConfig;
 import kd.trading.bot.model.MarketDataListener;
-import kd.trading.bot.service.RankingService;
+import kd.trading.bot.model.Signal;
+import kd.trading.bot.service.*;
 import kd.trading.bot.session.BinanceSessionManager;
-import kd.trading.bot.service.MarketDataPipelineService;
-import kd.trading.bot.service.TradableSymbolService;
 import kd.trading.bot.websocket.BinanceMarketWebSocketClient;
+import kd.trading.bot.websocket.TradeWebSocketService;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
@@ -29,6 +33,11 @@ public class TradingBotService implements MarketDataListener {
     final BinanceSessionManager sessionManager;
     final TradableSymbolService symbolService;
     final MarketDataPipelineService pipelineService;
+    final TradeService tradeService;
+    final ObjectMapper mapper;
+    final BinanceRestClient restClient;
+    final TradeTrackerService tracker;
+    final TradingConfig tradingConfig;
 
     private volatile Set<String> tradableSymbols;
     private volatile long lastProcessed = 0;
@@ -40,8 +49,8 @@ public class TradingBotService implements MarketDataListener {
         String wsUrlMain = "wss://fstream.binance.com/ws/!ticker@arr";
         BinanceMarketWebSocketClient client = new BinanceMarketWebSocketClient(new URI(wsUrlMain), this);
         client.connect();
-
     }
+
 
     @Scheduled(cron = "0 0 0 * * *", zone = "UTC")
     public void refreshTradableSymbols() {
@@ -57,8 +66,34 @@ public class TradingBotService implements MarketDataListener {
         return pipelineService.getLatestResult();
     }
 
+    public void runTradingCycle() {
+        RankingService.RankedCoins ranked = pipelineService.getLatestResult();
+        if (ranked == null) return;
+
+        if (tradeService.getActiveTrades().size() >= 4) return;
+
+        ranked.top().stream()
+                .filter(t -> t.getSignal() != Signal.NO_TRADE) // csak ha van érvényes jel
+                .limit(2)
+                .forEach(t -> tradeService.openTrade(t.getSymbol(), t.getSignal(), t.getLastPrice()));
+
+        ranked.bottom().stream()
+                .filter(t -> t.getSignal() != Signal.NO_TRADE)
+                .limit(2)
+                .forEach(t -> tradeService.openTrade(t.getSymbol(), t.getSignal(), t.getLastPrice()));
+    }
+
     @Override
     public void onMarketData(String message) {
+        //get symbols
         pipelineService.processMessage(message, tradableSymbols);
+
+        //2. trade
+        runTradingCycle();
+
+        //3. check trade.
+        String wsUrl = "wss://stream.binancefuture.com/ws/" + sessionManager.getListenKey();
+        TradeWebSocketService tradeClient = new TradeWebSocketService(wsUrl, tradeService, mapper, tracker, tradingConfig);
+        tradeClient.connect();
     }
 }

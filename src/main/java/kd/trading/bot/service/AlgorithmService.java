@@ -16,8 +16,8 @@ import java.util.List;
 public class AlgorithmService {
 
     private final BinanceRestClient restClient;
-    //swing trade: lassabb trade 1 naptól 1 hétig tart egy trade.
-    public CoinAnalysis analyzeSwingCoin(String symbol) {
+
+    public CoinAnalysis analyzeSwingCoin(String symbol, double lastPrice) {
         try {
             // 1️⃣ Lekérjük a napi gyertyákat (kb. 200 napra vissza)
             List<List<Object>> dailyKlines = restClient.getKlines(symbol, "1d", 200);
@@ -30,14 +30,14 @@ public class AlgorithmService {
                     .toList();
 
             if (closes.size() < 200) {
-                return new CoinAnalysis(symbol, 0.0, Signal.NO_TRADE);
+                return new CoinAnalysis(symbol, 0.0, Signal.NO_TRADE, 0.0);
             }
+
+            double lastClose = closes.get(closes.size() - 1);
 
             // 2️⃣ Trend filter: EMA50 vs EMA200
             double ema50 = IndicatorUtil.EMA(closes, 50);
             double ema200 = IndicatorUtil.EMA(closes, 200);
-            double lastClose = closes.get(closes.size() - 1);
-
             boolean bullTrend = ema50 > ema200 && lastClose > ema50;
             boolean bearTrend = ema50 < ema200 && lastClose < ema50;
 
@@ -47,40 +47,56 @@ public class AlgorithmService {
             double lastVol = volumes.get(volumes.size() - 1);
             boolean strongVolume = lastVol > 1.5 * avgVol20;
 
-            // 4️⃣ MACD filter (trend megerősítés)
+            // 4️⃣ MACD filter
             double[] macd = IndicatorUtil.MACD(closes, 12, 26, 9);
             double macdValue = macd[0];
             double macdSignal = macd[1];
             boolean macdBull = macdValue > macdSignal && macdValue > 0;
             boolean macdBear = macdValue < macdSignal && macdValue < 0;
 
-            // 5️⃣ Döntés
+            // 5️⃣ RSI
+            double rsi = IndicatorUtil.RSI(closes, 14);
+
+            // 6️⃣ ATH (All Time High)
+            double ath = closes.stream().mapToDouble(Double::doubleValue).max().orElse(lastClose);
+            double distanceFromAthPct = (ath - lastClose) / ath * 100;
+
+            // 🔹 Score számítás
+            double score = 0.0;
+
+            if (bullTrend) score += 3.0;
+            if (bearTrend) score -= 3.0;
+
+            if (strongVolume) score += 1.5;
+
+            if (macdBull) score += 2.0;
+            if (macdBear) score -= 2.0;
+
+            if (distanceFromAthPct < 10) score -= 2.0; // túl közel ATH-hoz
+            else score += 1.0;
+
+            if (rsi < 30) score += 2.0;
+            else if (rsi > 70) score -= 2.0;
+
+            // 🔹 Jelzés döntés
             Signal signal;
-            if (bullTrend && strongVolume && macdBull) {
+            if (score >= 4.0) {
                 signal = Signal.LONG;
-            } else if (bearTrend && strongVolume && macdBear) {
+            } else if (score <= -4.0) {
                 signal = Signal.SHORT;
             } else {
                 signal = Signal.NO_TRADE;
             }
 
-            log.debug("{} | ema50: {:.2f}, ema200: {:.2f}, volCheck: {}, macd: {:.2f}/{:.2f} => signal: {}",
-                    symbol, ema50, ema200, strongVolume, macdValue, macdSignal, signal);
+            log.debug("{} | EMA50: {:.2f}, EMA200: {:.2f}, MACD: {:.2f}/{:.2f}, RSI: {:.2f}, score: {:.1f} => {}",
+                    symbol, ema50, ema200, macdValue, macdSignal, rsi, score, signal);
 
-            return new CoinAnalysis(symbol, 0.0, signal);
+            return new CoinAnalysis(symbol, score, signal, lastPrice);
 
         } catch (Exception e) {
             log.error("Failed to analyze swing coin {}", symbol, e);
-            return new CoinAnalysis(symbol, 0.0, Signal.NO_TRADE);
+            return new CoinAnalysis(symbol, 0.0, Signal.NO_TRADE, lastPrice);
         }
     }
 
-    public List<CoinAnalysis> analyzeTopCoins(List<String> symbols, int topN) {
-        return symbols.stream()
-                .map(this::analyzeSwingCoin)
-                .sorted((a, b) -> Double.compare(b.getScore(), a.getScore()))
-                .limit(topN)
-                .toList();
-    }
 }
-
