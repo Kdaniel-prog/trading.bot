@@ -1,6 +1,7 @@
 package kd.trading.bot.service;
 
 import kd.trading.bot.model.BinanceTickerData;
+import kd.trading.bot.model.SymbolInfo;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -21,13 +22,13 @@ public class TickerPrefilterService {
      * @param tradableSymbols Binance által engedélyezett szimbólumok
      * @return max 60 legnagyobb forgalmú ticker
      */
-    public List<BinanceTickerData> prefilter(List<BinanceTickerData> tickers, Set<String> tradableSymbols) {
+    public List<BinanceTickerData> prefilter(List<BinanceTickerData> tickers, Set<SymbolInfo> tradableSymbols) {
         if (tickers == null || tickers.isEmpty()) {
             return List.of();
         }
 
         return tickers.stream()
-                .filter(ticker -> tradableSymbols.contains(ticker.getSymbol()))
+                .filter(ticker -> tradableSymbols.stream().anyMatch(s-> s.getSymbol().equals(ticker.getSymbol())))
                 .sorted(Comparator.comparingDouble(BinanceTickerData::getQuoteVolume).reversed())
                 .limit(MAX_CANDIDATES)
                 .toList();

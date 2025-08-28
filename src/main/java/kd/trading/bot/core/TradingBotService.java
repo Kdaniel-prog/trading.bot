@@ -3,10 +3,10 @@ package kd.trading.bot.core;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import kd.trading.bot.api.BinanceRestClient;
-import kd.trading.bot.config.binance.BinanceConfig;
 import kd.trading.bot.config.trading.TradingConfig;
 import kd.trading.bot.model.MarketDataListener;
 import kd.trading.bot.model.Signal;
+import kd.trading.bot.model.SymbolInfo;
 import kd.trading.bot.service.*;
 import kd.trading.bot.session.BinanceSessionManager;
 import kd.trading.bot.websocket.BinanceMarketWebSocketClient;
@@ -18,8 +18,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.Optional;
 import java.util.Set;
 
 @Service
@@ -39,7 +41,7 @@ public class TradingBotService implements MarketDataListener {
     final TradeTrackerService tracker;
     final TradingConfig tradingConfig;
 
-    private volatile Set<String> tradableSymbols;
+    private volatile Set<SymbolInfo> tradableSymbols;
     private volatile long lastProcessed = 0;
 
     @PostConstruct
@@ -70,17 +72,27 @@ public class TradingBotService implements MarketDataListener {
         RankingService.RankedCoins ranked = pipelineService.getLatestResult();
         if (ranked == null) return;
 
-        if (tradeService.getActiveTrades().size() >= 4) return;
+        if (tradeService.getActiveTrades().size() >= 6) return;
 
         ranked.top().stream()
                 .filter(t -> t.getSignal() != Signal.NO_TRADE) // csak ha van érvényes jel
                 .limit(2)
-                .forEach(t -> tradeService.openTrade(t.getSymbol(), t.getSignal(), t.getLastPrice()));
+                .forEach(t -> {
+                            Optional<SymbolInfo> symbol = tradableSymbols.stream()
+                                    .filter(s -> s.getSymbol().equals(t.getSymbol()))
+                                    .findFirst();
+                            tradeService.openTrade(t.getSignal(), BigDecimal.valueOf(t.getLastPrice()), symbol.get());
+                });
 
         ranked.bottom().stream()
                 .filter(t -> t.getSignal() != Signal.NO_TRADE)
                 .limit(2)
-                .forEach(t -> tradeService.openTrade(t.getSymbol(), t.getSignal(), t.getLastPrice()));
+                .forEach(t -> {
+                    Optional<SymbolInfo> symbol = tradableSymbols.stream()
+                            .filter(s -> s.getSymbol().equals(t.getSymbol()))
+                            .findFirst();
+                    tradeService.openTrade(t.getSignal(), BigDecimal.valueOf(t.getLastPrice()), symbol.get());
+                });
     }
 
     @Override

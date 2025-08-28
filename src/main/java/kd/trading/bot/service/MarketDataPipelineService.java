@@ -2,6 +2,7 @@ package kd.trading.bot.service;
 
 import kd.trading.bot.model.BinanceTickerData;
 import kd.trading.bot.model.CoinAnalysis;
+import kd.trading.bot.model.SymbolInfo;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -27,7 +28,7 @@ public class MarketDataPipelineService {
     @Getter
     volatile RankingService.RankedCoins latestResult = new RankingService.RankedCoins(List.of(), List.of());
 
-    public void processMessage(String message, Set<String> tradableSymbols) {
+    public void processMessage(String message, Set<SymbolInfo> tradableSymbols) {
         try {
             // 1. parse
             List<BinanceTickerData> tickers = parserService.parseMessage(message);

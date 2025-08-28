@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class BinanceMarketWebSocketClient extends WebSocketClient {
 
-    private static final long INTERVAL_MS = 300_000; // 3 minutes
+    private static final long INTERVAL_MS = 120_000; // 3 minutes
     private static final long PING_INTERVAL_MS = 30_000; // 30 sec ping
 
     private final MarketDataListener listener;
