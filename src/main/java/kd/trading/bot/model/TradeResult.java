@@ -11,7 +11,7 @@ import lombok.NoArgsConstructor;
 @Builder
 public class TradeResult {
     private String symbol;
-    private String side;
+    private Signal side;
     private double qty;
     private double entryPrice;
     private double exitPrice;

@@ -47,10 +47,16 @@ public class TradingBotService implements MarketDataListener {
     @PostConstruct
     private void init() throws URISyntaxException {
         refreshTradableSymbols();
+        String listenKey = sessionManager.getListenKey();
 
         String wsUrlMain = "wss://fstream.binance.com/ws/!ticker@arr";
         BinanceMarketWebSocketClient client = new BinanceMarketWebSocketClient(new URI(wsUrlMain), this);
         client.connect();
+
+        //3. check trade.
+        String wsUrl =  "wss://testnet.binancefuture.com/ws/" + listenKey;
+        TradeWebSocketService tradeClient = new TradeWebSocketService(wsUrl, tradeService, mapper, tracker, tradingConfig);
+        tradeClient.connect();
     }
 
 
@@ -102,10 +108,5 @@ public class TradingBotService implements MarketDataListener {
 
         //2. trade
         runTradingCycle();
-
-        //3. check trade.
-        String wsUrl = "wss://stream.binancefuture.com/ws/" + sessionManager.getListenKey();
-        TradeWebSocketService tradeClient = new TradeWebSocketService(wsUrl, tradeService, mapper, tracker, tradingConfig);
-        tradeClient.connect();
     }
 }

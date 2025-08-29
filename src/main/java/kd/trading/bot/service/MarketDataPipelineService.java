@@ -49,14 +49,9 @@ public class MarketDataPipelineService {
             if (analyzed.isEmpty()) return;
 
             // 5. ranking
-            RankingService.RankedCoins ranked = rankingService.rank(analyzed);
-            latestResult = ranked;
+            latestResult = rankingService.rank(analyzed);
 
-            log.info("=== TOP 5 ===");
-            ranked.top().forEach(c -> log.info("{} | Score {} | Signal {}", c.getSymbol(), c.getScore(), c.getSignal()));
-            log.info("=== BOTTOM 5 ===");
-            ranked.bottom().forEach(c -> log.info("{} | Score {} | Signal {}", c.getSymbol(), c.getScore(), c.getSignal()));
-
+            log.info("Coins Rated!");
         } catch (Exception e) {
             log.error("MarketData pipeline failed", e);
         }

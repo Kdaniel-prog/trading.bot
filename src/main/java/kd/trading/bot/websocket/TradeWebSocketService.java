@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import kd.trading.bot.api.BinanceRestClient;
 import kd.trading.bot.config.trading.TradingConfig;
+import kd.trading.bot.model.Signal;
+import kd.trading.bot.model.SymbolInfo;
+import kd.trading.bot.model.TradeDto;
 import kd.trading.bot.service.TradeService;
 import kd.trading.bot.service.TradeTrackerService;
 import lombok.AccessLevel;
@@ -13,6 +16,7 @@ import org.java_websocket.client.WebSocketClient;
 import org.java_websocket.handshake.ServerHandshake;
 import org.java_websocket.framing.PingFrame;
 
+import java.math.BigDecimal;
 import java.net.URI;
 import java.util.concurrent.*;
 
@@ -43,16 +47,73 @@ public class TradeWebSocketService extends WebSocketClient {
     }
 
     private void handleTradeUpdate(JsonNode node) {
-        String symbol = node.get("o").get("s").asText();
-        String side = node.get("o").get("S").asText();
-        String status = node.get("o").get("X").asText();
-        double qty = node.get("o").get("q").asDouble();
-        double price = node.get("o").get("ap").asDouble();
+        try {
+            JsonNode order = node.get("o");
 
-        log.info("TRADE UPDATE: {} {} {} qty={} price={}", symbol, side, status, qty, price);
+            String eventTime = node.has("E") ? String.valueOf(node.get("E").asLong()) : "?";
+            String symbol = order.get("s").asText();
+            String side = order.get("S").asText();
+            String type = order.get("o").asText();
+            String status = order.get("X").asText(); // current order status
+            String execType = order.get("x").asText(); // execution type
+            long orderId = order.get("i").asLong();
+            double qty = order.get("q").asDouble();
+            double filledQty = order.get("z").asDouble();
+            double avgPrice = order.get("ap").asDouble();
+            double lastPrice = order.get("L").asDouble();
 
-        if ("FILLED".equals(status)) {
-            tracker.recordTrade(symbol, side, qty, price, price);
+            log.info(
+                    "EXECUTION REPORT: time={} orderId={} symbol={} side={} type={} status={} execType={} qty={} filledQty={} lastPrice={} avgPrice={}",
+                    eventTime, orderId, symbol, side, type, status, execType, qty, filledQty, lastPrice, avgPrice
+            );
+
+            if ("FILLED".equals(status)) {
+                tracker.recordTrade(symbol, Signal.valueOf(side), qty, avgPrice, avgPrice);
+
+                // keresd meg az activeTrades-ben a tradet
+                TradeDto trade = TradeService.activeTrades.stream()
+                        .filter(s -> s.getSymbol().equals(symbol))
+                        .findFirst()
+                        .orElse(null);
+
+                if (trade != null) {
+                    BigDecimal price = BigDecimal.valueOf(avgPrice);
+
+                    // STOP LIMIT ellenőrzés
+                    if (trade.getSignal() == Signal.LONG && price.compareTo(BigDecimal.valueOf(trade.getStopLimit())) <= 0) {
+                        log.info("STOP LIMIT hit for {}", symbol);
+                        //closeTrade(trade, "STOP LIMIT hit", avgPrice);
+                    } else if (trade.getSignal() == Signal.SHORT && price.compareTo(BigDecimal.valueOf(trade.getStopLimit())) >= 0) {
+                        log.info("STOP LIMIT hit for {}", symbol);
+                        //closeTrade(trade, "STOP LIMIT hit", avgPrice);
+                    }
+
+                    // WIN LIMIT ellenőrzés
+                    if (trade.getSignal() == Signal.LONG && price.compareTo(BigDecimal.valueOf(trade.getWinLimit())) >= 0) {
+                        log.info("WIN LIMIT hit for {}", symbol);
+                        //closeTrade(trade, "WIN LIMIT hit", avgPrice);
+                    } else if (trade.getSignal() == Signal.SHORT && price.compareTo(BigDecimal.valueOf(trade.getWinLimit())) <= 0) {
+                        log.info("WIN LIMIT hit for {}", symbol);
+                        //closeTrade(trade, "WIN LIMIT hit", avgPrice);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("Error handling executionReport: {}", node, e);
+        }
+    }
+
+    private void closeTrade(TradeDto trade, String reason, double exitPrice) {
+        try {
+            log.info("Closing trade {} because {}", trade.getSymbol(), reason);
+
+            Signal opposite = trade.getSignal() == Signal.LONG ? Signal.SHORT : Signal.LONG;
+
+            //TradeService.closeTrade(trade);
+            //tracker.recordTrade(trade.getSymbol(), trade.getSignal(), trade.getQuantity(), trade.getEntryPrice(), exitPrice);
+
+        } catch (Exception e) {
+            log.error("Failed to close trade {}", trade.getSymbol(), e);
         }
     }
 
@@ -76,9 +137,12 @@ public class TradeWebSocketService extends WebSocketClient {
 
     @Override
     public void onMessage(String message) {
+        // minden nyers üzenet logolása debug szinten
+        log.debug("RAW WS MESSAGE: {}", message);
+
         try {
             JsonNode node = mapper.readTree(message);
-            String eventType = node.get("e").asText();
+            String eventType = node.has("e") ? node.get("e").asText() : "UNKNOWN";
 
             switch (eventType) {
                 case "executionReport":
@@ -91,7 +155,7 @@ public class TradeWebSocketService extends WebSocketClient {
                     log.debug("Unhandled event type: {}", eventType);
             }
         } catch (Exception e) {
-            log.error("Failed to parse WebSocket message: {}", message, e);
+            log.error("Failed to parse WebSocket message. Raw message: {}", message, e);
         }
     }
 

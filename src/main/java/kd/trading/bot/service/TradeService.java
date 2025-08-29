@@ -26,8 +26,8 @@ public class TradeService {
     private final BinanceRestClient restClient;
     private final TradingConfig tradingConfig;
 
-    private final static List<TradeDto> activeTrades = new ArrayList<>();
-    private final static Map<String, Instant> badTrades = new HashMap<>();
+    public final static List<TradeDto> activeTrades = new ArrayList<>();
+    public final static Map<String, Instant> badTrades = new HashMap<>();
 
     private static final int MAX_TRADES = 5;
 
@@ -85,6 +85,7 @@ public class TradeService {
             );
 
             if (entryOk) {
+                /**
                 // STOP LOSS order
                 restClient.placeStopOrder(
                         info,
@@ -94,13 +95,14 @@ public class TradeService {
                 );
 
                 // TAKE PROFIT order
+
                 restClient.placeTakeProfitOrder(
                         info,
                         normalizedQty,
                         BigDecimal.valueOf(winLimit),
                         signal
                 );
-
+                */
                 activeTrades.add(trade);
                 log.info("Opened trade: {} {} @{} SL={} TP={}",
                         signal, info.getSymbol(), normalizedPrice, stopLimit, winLimit);
@@ -110,7 +112,7 @@ public class TradeService {
         }
     }
 
-    public synchronized void closeTrade(TradeDto trade, boolean bad) {
+    public synchronized void closeTrade(TradeDto trade, Boolean bad) {
         try {
             BigDecimal stopPrice;
             // egyszerű példa: ha LONG, akkor stop = entryPrice * 0.98, ha SHORT akkor entryPrice * 1.02
