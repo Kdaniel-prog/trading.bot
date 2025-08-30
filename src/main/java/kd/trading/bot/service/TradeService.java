@@ -5,6 +5,7 @@ import kd.trading.bot.config.trading.TradingConfig;
 import kd.trading.bot.model.Signal;
 import kd.trading.bot.model.SymbolInfo;
 import kd.trading.bot.model.TradeDto;
+import kd.trading.bot.model.TradeStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -28,6 +29,7 @@ public class TradeService {
 
     public final static List<TradeDto> activeTrades = new ArrayList<>();
     public final static Map<String, Instant> badTrades = new HashMap<>();
+    public final static List<String> openTrades = new ArrayList<>();
 
     private static final int MAX_TRADES = 5;
 
@@ -77,14 +79,14 @@ public class TradeService {
 
         // order indítás
         try {
-            boolean entryOk = restClient.placeOrder(
+            TradeStatus tradeStatus = restClient.placeOrder(
                     info.getSymbol(),
                     normalizedQty,
                     normalizedPrice,
                     signal
             );
 
-            if (entryOk) {
+            if (tradeStatus.equals(TradeStatus.SUCCESS)) {
                 /**
                 // STOP LOSS order
                 restClient.placeStopOrder(
@@ -107,8 +109,26 @@ public class TradeService {
                 log.info("Opened trade: {} {} @{} SL={} TP={}",
                         signal, info.getSymbol(), normalizedPrice, stopLimit, winLimit);
             }
+            else if(tradeStatus.equals(TradeStatus.OPEN)) {
+                openTrades.add(trade.getSymbol().getSymbol());
+            }
         } catch (Exception e) {
             log.error("Failed to place order for {}", info.getSymbol(), e);
+        }
+    }
+
+    public synchronized void closeOpenTrades() {
+        if (!openTrades.isEmpty()) {
+            List<String> toRemove = new ArrayList<>();
+
+            for (String symbol : openTrades) {
+                boolean success = restClient.cancelOrdersForSymbol(symbol);
+                if (success) {
+                    toRemove.add(symbol);
+                }
+            }
+
+            openTrades.removeAll(toRemove);
         }
     }
 

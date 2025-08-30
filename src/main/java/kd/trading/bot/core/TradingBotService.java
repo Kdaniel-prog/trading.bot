@@ -4,13 +4,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import kd.trading.bot.api.BinanceRestClient;
 import kd.trading.bot.config.trading.TradingConfig;
-import kd.trading.bot.model.MarketDataListener;
+import kd.trading.bot.interfaces.MarketDataListener;
+import kd.trading.bot.interfaces.AccountDataListener;
+import kd.trading.bot.model.AccountUpdateDto;
+import kd.trading.bot.model.OrderTradeUpdateDto;
 import kd.trading.bot.model.Signal;
 import kd.trading.bot.model.SymbolInfo;
 import kd.trading.bot.service.*;
 import kd.trading.bot.session.BinanceSessionManager;
+import kd.trading.bot.util.BinanceEventConverter;
 import kd.trading.bot.websocket.BinanceMarketWebSocketClient;
-import kd.trading.bot.websocket.TradeWebSocketService;
+import kd.trading.bot.websocket.AccountWebSocketService;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
@@ -28,10 +32,7 @@ import java.util.Set;
 @RequiredArgsConstructor
 @Slf4j
 @FieldDefaults(level = AccessLevel.PRIVATE)
-public class TradingBotService implements MarketDataListener {
-
-    static final long INTERVAL_MS = 180_000; // 3 minutes
-
+public class TradingBotService implements MarketDataListener, AccountDataListener {
     final BinanceSessionManager sessionManager;
     final TradableSymbolService symbolService;
     final MarketDataPipelineService pipelineService;
@@ -40,9 +41,10 @@ public class TradingBotService implements MarketDataListener {
     final BinanceRestClient restClient;
     final TradeTrackerService tracker;
     final TradingConfig tradingConfig;
+    final BinanceEventConverter converter;
 
     private volatile Set<SymbolInfo> tradableSymbols;
-    private volatile long lastProcessed = 0;
+    private double profit = 0.0;
 
     @PostConstruct
     private void init() throws URISyntaxException {
@@ -54,8 +56,8 @@ public class TradingBotService implements MarketDataListener {
         client.connect();
 
         //3. check trade.
-        String wsUrl =  "wss://testnet.binancefuture.com/ws/" + listenKey;
-        TradeWebSocketService tradeClient = new TradeWebSocketService(wsUrl, tradeService, mapper, tracker, tradingConfig);
+        String wsUrl =  "wss://stream.binancefuture.com/ws/" + listenKey;
+        AccountWebSocketService tradeClient = new AccountWebSocketService(wsUrl,this);
         tradeClient.connect();
     }
 
@@ -108,5 +110,36 @@ public class TradingBotService implements MarketDataListener {
 
         //2. trade
         runTradingCycle();
+
+        //3. delete open trades
+        tradeService.closeOpenTrades();
+    }
+
+    @Override
+    public void onTradeData(String message) {
+        Object dto = converter.convert(message);
+
+        if (dto instanceof AccountUpdateDto acc) {
+            // unrealized és cumulative realized profit
+            /**
+            if (!acc.a.P.isEmpty()) {
+                AccountUpdateDto.Position pos = acc.a.P.get(0);
+                System.out.println("Unrealized PnL: " + pos.up);
+                System.out.println("Cumulative Realized PnL: " + pos.cr);
+            }
+             */
+        } else if (dto instanceof OrderTradeUpdateDto order) {
+            String status = order.o.X;
+            if ("FILLED".equals(status)) {
+                String realized = order.o.rp; // realized profit
+                String side = order.o.S;
+                String qty = order.o.q;
+                String price = order.o.p;
+                profit += Double.parseDouble(order.o.rp);
+                System.out.printf("Trade CLOSED: %s %s @ %s | Profit/Loss: %s%n",
+                        side, qty, price, realized);
+                System.out.printf("All profit: %s ", profit);
+            }
+        }
     }
 }

@@ -1,6 +1,6 @@
 package kd.trading.bot.websocket;
 
-import kd.trading.bot.interfaces.MarketDataListener;
+import kd.trading.bot.interfaces.AccountDataListener;
 import lombok.AccessLevel;
 import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
@@ -15,18 +15,17 @@ import java.util.concurrent.TimeUnit;
 
 @FieldDefaults(level = AccessLevel.PRIVATE)
 @Slf4j
-public class BinanceMarketWebSocketClient extends WebSocketClient {
-
+public class AccountWebSocketService extends WebSocketClient  {
     static final long INTERVAL_MS = 180_000; // 3 minutes
     static final long PING_INTERVAL_MS = 30_000; // 30 sec ping
 
-    final MarketDataListener listener;
-    volatile long lastProcessed = 0;
     final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
 
-    public BinanceMarketWebSocketClient(URI serverUri, MarketDataListener listener) {
-        super(serverUri);
-        this.listener = listener;
+    final AccountDataListener accountDataListener;
+
+    public AccountWebSocketService(String serverUri, AccountDataListener accountDataListener) {
+        super(URI.create(serverUri));
+        this.accountDataListener = accountDataListener;
     }
 
     public void sendPingFrame() {
@@ -42,7 +41,7 @@ public class BinanceMarketWebSocketClient extends WebSocketClient {
 
     @Override
     public void onOpen(ServerHandshake handshakeData) {
-        log.info("Connected to Binance Futures Market WebSocket");
+        log.info("Connected Account Data WebSocket");
 
         // start ping/pong to keep alive
         scheduler.scheduleAtFixedRate(() -> {
@@ -56,13 +55,7 @@ public class BinanceMarketWebSocketClient extends WebSocketClient {
 
     @Override
     public void onMessage(String message) {
-        long now = System.currentTimeMillis();
-        if (now - lastProcessed < INTERVAL_MS) return; // skip until interval passed
-        lastProcessed = now;
-        // Forward raw message to TradingBotService
-        if(listener != null){
-            listener.onMarketData(message);
-        }
+        this.accountDataListener.onTradeData(message);
     }
 
     @Override
@@ -82,6 +75,4 @@ public class BinanceMarketWebSocketClient extends WebSocketClient {
     public void onError(Exception ex) {
         log.error("Error: ", ex);
     }
-
 }
-

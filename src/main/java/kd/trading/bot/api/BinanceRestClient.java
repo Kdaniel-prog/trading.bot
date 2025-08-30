@@ -7,6 +7,8 @@ import kd.trading.bot.config.binance.BinanceConfig;
 import kd.trading.bot.model.ExchangeInfo;
 import kd.trading.bot.model.Signal;
 import kd.trading.bot.model.SymbolInfo;
+import kd.trading.bot.model.TradeStatus;
+import kd.trading.bot.util.SignatureUtil;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.experimental.FieldDefaults;
@@ -25,10 +27,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.HexFormat;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 @Slf4j
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
@@ -38,6 +37,7 @@ public class BinanceRestClient {
     ObjectMapper mapper;
     BinanceConfig config;
     HttpClient client;
+    SignatureUtil util;
 
     public String createListenKey() throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder()
@@ -117,26 +117,7 @@ public class BinanceRestClient {
         }
     }
 
-    public String sign(String data) {
-        try {
-            Mac sha256_HMAC = Mac.getInstance("HmacSHA256");
-            SecretKeySpec secret_key = new SecretKeySpec(config.secretKey().getBytes(StandardCharsets.UTF_8), "HmacSHA256");
-            sha256_HMAC.init(secret_key);
-            byte[] hash = sha256_HMAC.doFinal(data.getBytes(StandardCharsets.UTF_8));
-            StringBuilder hexResult = new StringBuilder();
-            for (byte b : hash) {
-                String hex = Integer.toHexString(0xff & b);
-                if (hex.length() == 1) hexResult.append('0');
-                hexResult.append(hex);
-            }
-            return hexResult.toString();
-        } catch (Exception e) {
-            throw new RuntimeException("Error while signing", e);
-        }
-    }
-
-
-    public boolean placeOrder(String symbol, BigDecimal qty, BigDecimal price, Signal signal) {
+    public TradeStatus placeOrder(String symbol, BigDecimal qty, BigDecimal price, Signal signal) {
         try {
             String side = signal == Signal.LONG ? "BUY" : "SELL";
 
@@ -150,7 +131,7 @@ public class BinanceRestClient {
             params.put("timestamp", String.valueOf(System.currentTimeMillis()));
 
             String queryString = buildQueryString(params);
-            String signature = sign(queryString);
+            String signature = util.sign(queryString);
 
             String finalUrl = config.restBaseUrl() + "/fapi/v1/order?" + queryString + "&signature=" + signature;
 
@@ -160,24 +141,62 @@ public class BinanceRestClient {
                     .POST(HttpRequest.BodyPublishers.noBody())
                     .build();
 
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            Optional<HttpResponse<String>> response =
+                    Optional.ofNullable(client.send(request, HttpResponse.BodyHandlers.ofString()));
 
-            log.info("Order response: {}", response.body());
+            response.ifPresent(stringHttpResponse -> log.info("Order response: {}", stringHttpResponse.body()));
 
-            return response.body().contains("orderId");
+            if(response.isEmpty()) {
+                return TradeStatus.ERROR;
+            }
 
+            if(response.get().body().contains("\"executedQty\":\"0\"")) {
+                 return TradeStatus.OPEN;
+             }
+
+             return TradeStatus.SUCCESS;
         } catch (Exception e) {
-            log.error("Error placing order for {}", symbol, e);
+            String msg = (e.getMessage() != null) ? e.getMessage() : e.toString();
+            log.error("Error placing order for {}: {}", symbol, msg, e);
+            return TradeStatus.ERROR;
+        }
+    }
+
+    public Boolean cancelOrdersForSymbol(String symbol) {
+        try {
+            Map<String, String> params = new LinkedHashMap<>();
+            params.put("symbol", symbol);
+            params.put("timestamp", String.valueOf(System.currentTimeMillis()));
+
+            String queryString = buildQueryString(params);
+            String signature = util.sign(queryString);
+
+            String finalUrl = config.restBaseUrl() + "/fapi/v1/allOpenOrders?" + queryString + "&signature=" + signature;
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(finalUrl))
+                    .header("X-MBX-APIKEY", config.apiKey())
+                    .DELETE()
+                    .build();
+
+            Optional<HttpResponse<String>> response;
+            response = Optional.ofNullable(client.send(request, HttpResponse.BodyHandlers.ofString()));
+
+            return response.isPresent() && response.get().statusCode() == 200;
+        } catch (Exception e) {
+            String msg = (e.getMessage() != null) ? e.getMessage() : e.toString();
+            log.error("Error canceling orders for symbols: {}", msg, e);
             return false;
         }
     }
+
 
     public String getUsdtBalance() {
         try {
             long timestamp = System.currentTimeMillis();
             long recvWindow = 5000L;
             String query = "timestamp=" + timestamp + "&recvWindow=" + recvWindow;
-            String signature = sign(query);
+            String signature = util.sign(query);
             String url = config.restBaseUrl() + "/fapi/v2/balance?" + query + "&signature=" + signature;
 
             HttpRequest request = HttpRequest.newBuilder()
@@ -228,7 +247,7 @@ public class BinanceRestClient {
             params.put("timestamp", String.valueOf(System.currentTimeMillis()));
 
             String queryString = buildQueryString(params);
-            String signature = sign(queryString);
+            String signature = util.sign(queryString);
 
             String finalUrl = config.restBaseUrl() + "/fapi/v1/order?" + queryString + "&signature=" + signature;
 
@@ -275,7 +294,7 @@ public class BinanceRestClient {
             params.put("timestamp", String.valueOf(System.currentTimeMillis()));
 
             String queryString = buildQueryString(params);
-            String signature = sign(queryString);
+            String signature = util.sign(queryString);
 
             String finalUrl = config.restBaseUrl() + "/fapi/v1/order?" + queryString + "&signature=" + signature;
 
