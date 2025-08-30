@@ -7,6 +7,7 @@ public record BinanceConfig(
         String restBaseUrl,
         String wsBaseUrl,
         String apiKey,
-        String secretKey
+        String secretKey,
+        Integer coinMinMonth
 ) {
 }

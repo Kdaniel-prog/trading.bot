@@ -1,5 +1,6 @@
 package kd.trading.bot.session;
 
+import jakarta.annotation.PostConstruct;
 import kd.trading.bot.api.BinanceRestClient;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -9,8 +10,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import jakarta.annotation.PostConstruct;
-
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -19,11 +18,6 @@ public class BinanceSessionManager {
     @Getter
     String listenKey;
     final BinanceRestClient restClient;
-
-    @PostConstruct
-    public void init() {
-        createListenKey();
-    }
 
     private void createListenKey() {
         try {

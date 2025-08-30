@@ -1,8 +1,10 @@
 package kd.trading.bot.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import lombok.ToString;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
+@ToString
 public class OrderTradeUpdateDto {
     public String e; // event type
     public long E;   // event time

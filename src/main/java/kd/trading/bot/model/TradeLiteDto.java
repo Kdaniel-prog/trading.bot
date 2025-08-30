@@ -1,8 +1,10 @@
 package kd.trading.bot.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import lombok.ToString;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
+@ToString
 public class TradeLiteDto {
     public String e;
     public long E;

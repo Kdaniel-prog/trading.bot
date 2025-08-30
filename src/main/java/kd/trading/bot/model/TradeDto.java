@@ -1,5 +1,6 @@
 package kd.trading.bot.model;
 
+import kd.trading.bot.enums.Signal;
 import lombok.Data;
 
 import java.math.BigDecimal;

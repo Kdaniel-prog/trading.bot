@@ -1,8 +1,14 @@
 package kd.trading.bot.service;
 
+import jakarta.annotation.PostConstruct;
 import kd.trading.bot.api.BinanceRestClient;
 import kd.trading.bot.model.SymbolInfo;
+import lombok.AccessLevel;
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
+import lombok.experimental.FieldDefaults;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -13,12 +19,17 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
+@FieldDefaults(level = AccessLevel.PRIVATE)
 public class TradableSymbolService {
+    final BinanceRestClient restClient;
 
-    private final BinanceRestClient restClient;
+    @Getter
+    Set<SymbolInfo> tradableSymbols;
+    final static String CURRENCY = "USDT";
 
-    public synchronized Set<SymbolInfo> getTradableSymbols() {
-        return restClient.getTradableSymbols().stream()
+    public Set<SymbolInfo> getTradableSymbols() {
+        return restClient.getTradableSymbols(CURRENCY).stream()
                 .filter(s -> "TRADING".equalsIgnoreCase(s.getStatus()))
                 .filter(s -> {
                     if (s.getOnboardDate() == null) return false;
@@ -29,4 +40,13 @@ public class TradableSymbolService {
                 .collect(Collectors.toSet());
     }
 
+    @Scheduled(cron = "0 0 0 * * *", zone = "UTC")
+    public void refreshTradableSymbols() {
+        try {
+            tradableSymbols = getTradableSymbols();
+            log.info("Refreshed tradableSymbols. size: {}", tradableSymbols.size());
+        } catch (Exception e) {
+            log.error("Error refreshing tradableSymbols", e);
+        }
+    }
 }

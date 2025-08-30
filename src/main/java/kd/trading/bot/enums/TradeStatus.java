@@ -1,4 +1,4 @@
-package kd.trading.bot.model;
+package kd.trading.bot.enums;
 
 public enum TradeStatus {
     OPEN,

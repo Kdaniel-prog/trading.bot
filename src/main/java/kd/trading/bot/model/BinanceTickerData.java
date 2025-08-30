@@ -1,10 +1,10 @@
 package kd.trading.bot.model;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import kd.trading.bot.enums.Signal;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-
 
 @Data
 @NoArgsConstructor
