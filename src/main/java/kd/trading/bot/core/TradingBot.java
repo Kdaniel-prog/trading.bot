@@ -3,8 +3,10 @@ package kd.trading.bot.core;
 import jakarta.annotation.PostConstruct;
 import kd.trading.bot.interfaces.AccountDataListener;
 import kd.trading.bot.interfaces.MarketDataListener;
+import kd.trading.bot.model.TradeDto;
 import kd.trading.bot.service.TradableSymbolService;
-import kd.trading.bot.service.TradingService;
+import kd.trading.bot.service.TradeService;
+import kd.trading.bot.service.MarketDataPipelineService;
 import kd.trading.bot.session.BinanceSessionManager;
 import kd.trading.bot.websocket.AccountWebSocketService;
 import kd.trading.bot.websocket.BinanceMarketWebSocketClient;
@@ -20,20 +22,20 @@ import java.net.URISyntaxException;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-@FieldDefaults(level = AccessLevel.PRIVATE)
+@FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 public class TradingBot implements MarketDataListener, AccountDataListener {
-    final TradingService tradingService;
-    final TradableSymbolService tradableSymbolService;
-    final BinanceSessionManager sessionManager;
+     TradableSymbolService tradableSymbolService;
+     BinanceSessionManager sessionManager;
+     MarketDataPipelineService pipelineService;
 
     @PostConstruct
     private void init() throws URISyntaxException {
-        //2. check market
+        //1. start Binance market ws
         String wsUrlMain = "wss://fstream.binance.com/ws/!ticker@arr";
         BinanceMarketWebSocketClient client = new BinanceMarketWebSocketClient(new URI(wsUrlMain), this);
         client.connect();
 
-        //3. check trade.
+        //2. Start Account Update ws
         String wsUrl =  "wss://stream.binancefuture.com/ws/" + sessionManager.getListenKey();
         AccountWebSocketService tradeClient = new AccountWebSocketService(wsUrl,this);
         tradeClient.connect();
@@ -41,7 +43,17 @@ public class TradingBot implements MarketDataListener, AccountDataListener {
 
     @Override
     public void onTradeData(String message) {
+        //rate coins and trade
+        log.debug(message);
+        pipelineService.processMessage(message, tradableSymbolService.getTradableSymbols());
 
+        for(TradeDto trade: TradeService.activeTrades) {
+            log.debug("Active trades symbols: {}", trade.getSymbol());
+        }
+
+        for(String symbol: TradeService.openTrades) {
+            log.debug("Open trades symbols: {}", symbol);
+        }
     }
 
     @Override

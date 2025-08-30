@@ -17,9 +17,9 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class BinanceMarketWebSocketClient extends WebSocketClient {
 
-    static final long INTERVAL_MS = 300_000; // 5 minutes
+    static final long INTERVAL_MS = 25_000; // 25 sec
+    static final long INTERVAL_MS2 = 180_000; // 5 minutes
     static final long PING_INTERVAL_MS = 30_000; // 30 sec ping
-    static final long INTERVAL_MS2 = 25_000; // 20 sec minutes
 
     final MarketDataListener listener;
     volatile long lastProcessed = 0;
@@ -58,16 +58,18 @@ public class BinanceMarketWebSocketClient extends WebSocketClient {
 
     @Override
     public void onMessage(String message) {
+
         long now = System.currentTimeMillis();
 
         //Check active trades
-        if(now - lastProcessed >= INTERVAL_MS2){
+        if(now - lastProcessed >= INTERVAL_MS){
             lastProcessed = now;
             listener.onChangeData(message);
         }
 
         // Use Algo to rate coins
-        if (now - lastProcessed2 >= INTERVAL_MS) {
+        if (now - lastProcessed2 >= INTERVAL_MS2) {
+            log.debug(message);
             lastProcessed2 = now;
             listener.onMarketData(message);
         }

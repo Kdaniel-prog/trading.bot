@@ -8,6 +8,8 @@ public record TradingConfig(
         String winLimit,
         String tradeWithPercent,
         Double moneyUsdt,
-        Integer maxTrade
+        Integer maxTrade,
+        String coinType,
+        Integer coinMinMonth
 ) {
 }

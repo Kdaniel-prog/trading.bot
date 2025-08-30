@@ -25,11 +25,10 @@ public class TradableSymbolService {
     final BinanceRestClient restClient;
 
     @Getter
-    Set<SymbolInfo> tradableSymbols;
-    final static String CURRENCY = "USDT";
+    Set<SymbolInfo> symbols;
 
     public Set<SymbolInfo> getTradableSymbols() {
-        return restClient.getTradableSymbols(CURRENCY).stream()
+        return restClient.getBinanceTradableSymbols().stream()
                 .filter(s -> "TRADING".equalsIgnoreCase(s.getStatus()))
                 .filter(s -> {
                     if (s.getOnboardDate() == null) return false;
@@ -43,8 +42,8 @@ public class TradableSymbolService {
     @Scheduled(cron = "0 0 0 * * *", zone = "UTC")
     public void refreshTradableSymbols() {
         try {
-            tradableSymbols = getTradableSymbols();
-            log.info("Refreshed tradableSymbols. size: {}", tradableSymbols.size());
+            symbols = getTradableSymbols();
+            log.info("Refreshed tradableSymbols. size: {}", symbols.size());
         } catch (Exception e) {
             log.error("Error refreshing tradableSymbols", e);
         }
