@@ -12,8 +12,6 @@ import java.util.List;
 @Slf4j
 public class MarketDataParserService {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
-
     /**
      * Binance arr ticker üzenet parse-olása.
      * @param message a WebSocket-ről kapott JSON string
@@ -21,6 +19,7 @@ public class MarketDataParserService {
      */
     public List<BinanceTickerData> parseMessage(String message) {
         try {
+            ObjectMapper MAPPER = new ObjectMapper();
             return MAPPER.readValue(
                     message,
                     new TypeReference<List<BinanceTickerData>>() {}

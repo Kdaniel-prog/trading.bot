@@ -6,10 +6,7 @@ import kd.trading.bot.api.BinanceRestClient;
 import kd.trading.bot.config.trading.TradingConfig;
 import kd.trading.bot.interfaces.MarketDataListener;
 import kd.trading.bot.interfaces.AccountDataListener;
-import kd.trading.bot.model.AccountUpdateDto;
-import kd.trading.bot.model.OrderTradeUpdateDto;
-import kd.trading.bot.model.Signal;
-import kd.trading.bot.model.SymbolInfo;
+import kd.trading.bot.model.*;
 import kd.trading.bot.service.*;
 import kd.trading.bot.session.BinanceSessionManager;
 import kd.trading.bot.util.BinanceEventConverter;
@@ -25,6 +22,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -42,6 +40,8 @@ public class TradingBotService implements MarketDataListener, AccountDataListene
     final TradeTrackerService tracker;
     final TradingConfig tradingConfig;
     final BinanceEventConverter converter;
+    final MarketDataParserService marketDataParserService;
+    final ControlTradesService controlTradesService;
 
     private volatile Set<SymbolInfo> tradableSymbols;
     private double profit = 0.0;
@@ -116,6 +116,12 @@ public class TradingBotService implements MarketDataListener, AccountDataListene
     }
 
     @Override
+    public void onChangeData(String message) {
+        List<BinanceTickerData> coins = marketDataParserService.parseMessage(message);
+        controlTradesService.checkTrades(coins);
+    }
+
+    @Override
     public void onTradeData(String message) {
         Object dto = converter.convert(message);
 
@@ -138,7 +144,16 @@ public class TradingBotService implements MarketDataListener, AccountDataListene
                 profit += Double.parseDouble(order.o.rp);
                 System.out.printf("Trade CLOSED: %s %s @ %s | Profit/Loss: %s%n",
                         side, qty, price, realized);
-                System.out.printf("All profit: %s ", profit);
+                System.out.printf("All profit: %s%n", profit);
+
+                boolean removed = TradeService.activeTrades.removeIf(
+                        t -> t.getSymbol().getSymbol().equals(order.o.s)
+                );
+                if (removed) {
+                    log.info("Removed trade with symbol: {}", order.o.s);
+                } else {
+                    log.warn("No active trade found for symbol: {}", order.o.s);
+                }
             }
         }
     }

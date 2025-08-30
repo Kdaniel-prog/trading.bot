@@ -6,6 +6,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public record TradingConfig(
         String stopLimit,
         String winLimit,
-        String tradeWithPercent
+        String tradeWithPercent,
+        Double moneyUsdt,
+        Integer maxTrade
 ) {
 }

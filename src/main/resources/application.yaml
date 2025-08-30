@@ -11,9 +11,10 @@ binance:
 
 
 trading:
-  stopLimit: 0.6
-  winLimit: 0.12
-  tradeWithPercent: 0.2
+  stopLimit: -0.15
+  winLimit: 0.30
+  moneyUsdt: 50
+  maxTrade: 5
 
 realBinance:
   restBaseUrl: https://fapi.binance.com

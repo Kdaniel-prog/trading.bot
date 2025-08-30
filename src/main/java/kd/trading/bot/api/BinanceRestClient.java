@@ -141,20 +141,28 @@ public class BinanceRestClient {
                     .POST(HttpRequest.BodyPublishers.noBody())
                     .build();
 
-            Optional<HttpResponse<String>> response =
-                    Optional.ofNullable(client.send(request, HttpResponse.BodyHandlers.ofString()));
-
-            response.ifPresent(stringHttpResponse -> log.info("Order response: {}", stringHttpResponse.body()));
-
-            if(response.isEmpty()) {
+            HttpResponse<String> resp;
+            try {
+                resp = client.send(request, HttpResponse.BodyHandlers.ofString());
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt(); // visszaállítjuk az interrupt flag-et
+                log.error("HTTP request interrupted for symbol {}", symbol, ie);
                 return TradeStatus.ERROR;
             }
 
-            if(response.get().body().contains("\"executedQty\":\"0\"")) {
-                 return TradeStatus.OPEN;
-             }
+            if (resp == null || resp.body() == null) {
+                log.error("Null or empty HTTP response for symbol {}", symbol);
+                return TradeStatus.ERROR;
+            }
 
-             return TradeStatus.SUCCESS;
+            log.info("Order response: {}", resp.body());
+
+            if (resp.body().contains("\"executedQty\":\"0\"")) {
+                return TradeStatus.OPEN;
+            }
+
+            return TradeStatus.SUCCESS;
+
         } catch (Exception e) {
             String msg = (e.getMessage() != null) ? e.getMessage() : e.toString();
             log.error("Error placing order for {}: {}", symbol, msg, e);
@@ -312,6 +320,99 @@ public class BinanceRestClient {
         } catch (Exception e) {
             log.error("Error placing take profit order for {}", info.getSymbol(), e);
             return false;
+        }
+    }
+
+    public TradeStatus finishOrder(String symbol, Signal signal, BigDecimal quantity) {
+        try {
+            String side = signal == Signal.LONG ? "SELL" : "BUY"; // zárás mindig az ellenkező oldal
+
+            Map<String, String> params = new LinkedHashMap<>();
+            params.put("symbol", symbol);
+            params.put("side", side);
+            params.put("type", "MARKET"); // első körben MARKET order
+            params.put("quantity", quantity.stripTrailingZeros().toPlainString());
+            params.put("reduceOnly", "true");
+            params.put("timestamp", String.valueOf(System.currentTimeMillis()));
+
+            String queryString = buildQueryString(params);
+            String signature = util.sign(queryString);
+
+            String finalUrl = config.restBaseUrl() + "/fapi/v1/order?" + queryString + "&signature=" + signature;
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(finalUrl))
+                    .header("X-MBX-APIKEY", config.apiKey())
+                    .POST(HttpRequest.BodyPublishers.noBody())
+                    .build();
+
+            HttpResponse<String> resp;
+            try {
+                resp = client.send(request, HttpResponse.BodyHandlers.ofString());
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                log.error("HTTP request interrupted when closing order for {}", symbol, ie);
+                return TradeStatus.ERROR;
+            }
+
+            if (resp == null || resp.body() == null) {
+                log.error("Null or empty HTTP response when closing order for {}", symbol);
+                return TradeStatus.ERROR;
+            }
+
+            log.info("Close order response: {}", resp.body());
+
+            // Binance hibák kezelése
+            if (resp.statusCode() >= 400 || resp.body().contains("code")) {
+                if (resp.body().contains("PERCENT_PRICE")) {
+                    log.warn("Failed due to PERCENT_PRICE filter. Retrying with MARKET...");
+                    return retryWithMarket(symbol, side); // fallback
+                }
+                return TradeStatus.ERROR;
+            }
+
+            return TradeStatus.SUCCESS;
+
+        } catch (Exception e) {
+            log.error("Exception while finishing order for {}", symbol, e);
+            return TradeStatus.ERROR;
+        }
+    }
+
+    private TradeStatus retryWithMarket(String symbol, String side) {
+        try {
+            Map<String, String> params = new LinkedHashMap<>();
+            params.put("symbol", symbol);
+            params.put("side", side);
+            params.put("type", "MARKET");
+            params.put("reduceOnly", "true");
+            params.put("timestamp", String.valueOf(System.currentTimeMillis()));
+
+            String queryString = buildQueryString(params);
+            String signature = util.sign(queryString);
+
+            String finalUrl = config.restBaseUrl() + "/fapi/v1/order?" + queryString + "&signature=" + signature;
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(finalUrl))
+                    .header("X-MBX-APIKEY", config.apiKey())
+                    .POST(HttpRequest.BodyPublishers.noBody())
+                    .build();
+
+            HttpResponse<String> resp = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            log.info("Retry MARKET close response: {}", resp.body());
+
+            if (resp.statusCode() >= 400) {
+                log.error("Retry MARKET order failed for {} with status {}", symbol, resp.statusCode());
+                return TradeStatus.ERROR;
+            }
+
+            return TradeStatus.SUCCESS;
+
+        } catch (Exception e) {
+            log.error("Retry MARKET close failed for {}", symbol, e);
+            return TradeStatus.ERROR;
         }
     }
 }

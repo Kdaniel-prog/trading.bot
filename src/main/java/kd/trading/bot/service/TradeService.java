@@ -15,9 +15,13 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+import jakarta.annotation.PostConstruct;
+import java.util.*;
+import java.util.concurrent.*;
 
 @Service
 @RequiredArgsConstructor
@@ -27,14 +31,41 @@ public class TradeService {
     private final BinanceRestClient restClient;
     private final TradingConfig tradingConfig;
 
-    public final static List<TradeDto> activeTrades = new ArrayList<>();
-    public final static Map<String, Instant> badTrades = new HashMap<>();
-    public final static List<String> openTrades = new ArrayList<>();
+    public static final List<TradeDto> activeTrades = new CopyOnWriteArrayList<>();
+    public static final Map<String, Instant> badTrades = new ConcurrentHashMap<>();
+    public static final Set<String> openTrades = ConcurrentHashMap.newKeySet();
 
-    private static final int MAX_TRADES = 5;
+    // --- új queue + worker thread ---
+    private final BlockingQueue<Runnable> tradeQueue = new LinkedBlockingQueue<>();
+    private final ExecutorService worker = Executors.newSingleThreadExecutor();
 
-    public synchronized void openTrade(Signal signal, BigDecimal lastPrice, SymbolInfo info) {
-        if (activeTrades.size() >= MAX_TRADES) {
+    @PostConstruct
+    public void initWorker() {
+        worker.submit(this::processTrades);
+    }
+
+    private void processTrades() {
+        while (true) {
+            try {
+                Runnable task = tradeQueue.take();
+                task.run();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("Trade worker interrupted, exiting.");
+                break;
+            } catch (Exception e) {
+                log.error("Unexpected error in trade worker", e);
+            }
+        }
+    }
+
+    // --- Trade nyitása ---
+    public void openTrade(Signal signal, BigDecimal lastPrice, SymbolInfo info) {
+        tradeQueue.offer(() -> handleOpenTrade(signal, lastPrice, info));
+    }
+
+    private void handleOpenTrade(Signal signal, BigDecimal lastPrice, SymbolInfo info) {
+        if (activeTrades.size() >= tradingConfig.maxTrade()) {
             log.info("Max trades reached, skipping {}", info.getSymbol());
             return;
         }
@@ -46,17 +77,10 @@ public class TradeService {
         int priceScale = info.getPriceScaleOrDefault();
         int qtyScale = info.getQuantityScaleOrDefault();
 
-        // ár normalizálása
         BigDecimal normalizedPrice = lastPrice.setScale(priceScale, RoundingMode.DOWN);
+        BigDecimal normalizedQty = calculateQtyForSymbol(info, lastPrice)
+                .setScale(qtyScale, RoundingMode.DOWN);
 
-        // fix order érték $-ban (kívülről is paraméterezhető)
-        BigDecimal orderValue = BigDecimal.valueOf(50.0);
-        BigDecimal rawQty = orderValue.divide(lastPrice, qtyScale + 5, RoundingMode.DOWN);
-
-        // végleges mennyiség
-        BigDecimal normalizedQty = rawQty.setScale(qtyScale, RoundingMode.DOWN);
-
-        // stop és take profit számítás
         double stopLimit;
         double winLimit;
         if (signal == Signal.LONG) {
@@ -67,7 +91,6 @@ public class TradeService {
             winLimit  = lastPrice.doubleValue() * (1 - Double.parseDouble(tradingConfig.winLimit()) / 100.0);
         }
 
-        // trade objektum
         TradeDto trade = new TradeDto();
         trade.setSymbol(info);
         trade.setSignal(signal);
@@ -77,65 +100,56 @@ public class TradeService {
         trade.setOpenedAt(Instant.now());
         trade.setQuantity(normalizedQty);
 
-        // order indítás
         try {
-            TradeStatus tradeStatus = restClient.placeOrder(
+            TradeStatus status = restClient.placeOrder(
                     info.getSymbol(),
                     normalizedQty,
                     normalizedPrice,
                     signal
             );
 
-            if (tradeStatus.equals(TradeStatus.SUCCESS)) {
-                /**
-                // STOP LOSS order
-                restClient.placeStopOrder(
-                        info,
-                        normalizedQty,
-                        BigDecimal.valueOf(stopLimit),
-                        signal
-                );
-
-                // TAKE PROFIT order
-
-                restClient.placeTakeProfitOrder(
-                        info,
-                        normalizedQty,
-                        BigDecimal.valueOf(winLimit),
-                        signal
-                );
-                */
+            if (status == TradeStatus.SUCCESS) {
                 activeTrades.add(trade);
                 log.info("Opened trade: {} {} @{} SL={} TP={}",
                         signal, info.getSymbol(), normalizedPrice, stopLimit, winLimit);
+            } else if (status == TradeStatus.OPEN) {
+                openTrades.add(info.getSymbol());
+                log.warn("Trade still OPEN for {}", info.getSymbol());
+            } else {
+                log.warn("Trade failed for {} {}", signal, info.getSymbol());
             }
-            else if(tradeStatus.equals(TradeStatus.OPEN)) {
-                openTrades.add(trade.getSymbol().getSymbol());
-            }
+
         } catch (Exception e) {
             log.error("Failed to place order for {}", info.getSymbol(), e);
         }
     }
 
-    public synchronized void closeOpenTrades() {
+    // --- Open trade-ek lezárása ---
+    public void closeOpenTrades() {
+        tradeQueue.offer(this::handleCloseOpenTrades);
+    }
+
+    private void handleCloseOpenTrades() {
         if (!openTrades.isEmpty()) {
             List<String> toRemove = new ArrayList<>();
-
             for (String symbol : openTrades) {
                 boolean success = restClient.cancelOrdersForSymbol(symbol);
                 if (success) {
                     toRemove.add(symbol);
                 }
             }
-
             openTrades.removeAll(toRemove);
         }
     }
 
-    public synchronized void closeTrade(TradeDto trade, Boolean bad) {
+    // --- Trade zárása ---
+    public void closeTrade(TradeDto trade, boolean bad) {
+        tradeQueue.offer(() -> handleCloseTrade(trade, bad));
+    }
+
+    private void handleCloseTrade(TradeDto trade, boolean bad) {
         try {
             BigDecimal stopPrice;
-            // egyszerű példa: ha LONG, akkor stop = entryPrice * 0.98, ha SHORT akkor entryPrice * 1.02
             if (trade.getSignal() == Signal.LONG) {
                 stopPrice = trade.getEntryPrice().multiply(BigDecimal.valueOf(0.98));
             } else {
@@ -162,7 +176,7 @@ public class TradeService {
     }
 
     @Scheduled(fixedRate = 60_000)
-    public synchronized void cleanupBadTrades() {
+    public void cleanupBadTrades() {
         Instant now = Instant.now();
         badTrades.entrySet().removeIf(entry ->
                 now.isAfter(entry.getValue().plusSeconds(5 * 3600))
@@ -173,45 +187,34 @@ public class TradeService {
         return List.copyOf(activeTrades);
     }
 
+    // --- Qty számítás szűrőkkel ---
     private BigDecimal calculateQtyForSymbol(SymbolInfo info, BigDecimal lastPrice) {
-        // Lekérjük a symbolhoz tartozó metaadatokat
         if (info == null) {
-            throw new IllegalArgumentException("SymbolInfo not found for: " + info.getSymbol());
+            throw new IllegalArgumentException("SymbolInfo is null");
         }
-
-        // Lot size filter
         SymbolInfo.Filter lotSize = info.getFilter("LOT_SIZE");
         BigDecimal minQty   = new BigDecimal(lotSize.getMinQty());
         BigDecimal maxQty   = new BigDecimal(lotSize.getMaxQty());
         BigDecimal stepSize = new BigDecimal(lotSize.getStepSize());
 
-        // Min notional filter (ha van)
         SymbolInfo.Filter notionalFilter = info.getFilter("MIN_NOTIONAL");
         BigDecimal minNotional = notionalFilter != null && notionalFilter.getNotional() != null
                 ? new BigDecimal(notionalFilter.getNotional())
                 : BigDecimal.ZERO;
 
-        // Példa: balance egy részével számolunk
         BigDecimal usdtBalance = BigDecimal.valueOf(50.0);
         BigDecimal rawQty = usdtBalance.divide(lastPrice, 8, RoundingMode.DOWN);
 
-        // Ellenőrizzük a notional-t
         BigDecimal orderValue = rawQty.multiply(lastPrice);
         if (orderValue.compareTo(minNotional) < 0) {
             rawQty = minNotional.divide(lastPrice, 8, RoundingMode.UP);
         }
 
-        // Illesszük a stepSize-hoz
         int precision = stepSize.stripTrailingZeros().scale();
         BigDecimal adjusted = rawQty.setScale(precision, RoundingMode.DOWN);
 
-        // Határok közé szorítás
-        if (adjusted.compareTo(minQty) < 0) {
-            adjusted = minQty;
-        }
-        if (adjusted.compareTo(maxQty) > 0) {
-            adjusted = maxQty;
-        }
+        if (adjusted.compareTo(minQty) < 0) adjusted = minQty;
+        if (adjusted.compareTo(maxQty) > 0) adjusted = maxQty;
 
         return adjusted;
     }
