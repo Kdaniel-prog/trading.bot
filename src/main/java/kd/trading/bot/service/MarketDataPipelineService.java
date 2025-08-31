@@ -1,15 +1,17 @@
 package kd.trading.bot.service;
 
 import kd.trading.bot.config.trading.TradingConfig;
+import kd.trading.bot.enums.OrderSide;
 import kd.trading.bot.enums.Signal;
 import kd.trading.bot.model.BinanceTickerData;
 import kd.trading.bot.model.CoinAnalysis;
+import kd.trading.bot.model.OrderDto;
 import kd.trading.bot.model.SymbolInfo;
 import kd.trading.bot.service.ratingProcess.AlgorithmService;
 import kd.trading.bot.service.ratingProcess.AthFilterService;
 import kd.trading.bot.service.ratingProcess.RankingService;
 import kd.trading.bot.service.ratingProcess.TickerPrefilterService;
-import kd.trading.bot.util.MarketDataMessageParser;
+import kd.trading.bot.util.MessageParser;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -18,6 +20,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.List;
 import java.util.Set;
 
@@ -26,7 +29,7 @@ import java.util.Set;
 @Slf4j
 @FieldDefaults(level = AccessLevel.PRIVATE)
 public class MarketDataPipelineService {
-    final MarketDataMessageParser parser;
+    final MessageParser parser;
     final TickerPrefilterService prefilterService;
     final AthFilterService athFilterService;
     final RankingService rankingService;
@@ -34,13 +37,17 @@ public class MarketDataPipelineService {
     final TradingConfig tradingConfig;
     final TradeService tradeService;
 
+
     @Getter
     volatile RankingService.RankedCoins latestResult = new RankingService.RankedCoins(List.of(), List.of());
 
     public void processMessage(String message, Set<SymbolInfo> tradableSymbols) {
         try {
+            //0. lépés nézzük meg hogy van e már 5 active tradünk
+            if(TradeService.getActiveOrderList().size() >= tradingConfig.maxTrade()) return;
+
             // 1. parse
-            List<BinanceTickerData> tickers = parser.parseMessage(message);
+            List<BinanceTickerData> tickers = parser.parseMarketMessage(message);
             if (tickers.isEmpty()) return;
 
             // 2. prefilter
@@ -63,6 +70,11 @@ public class MarketDataPipelineService {
 
             //6. trade
             runTradingCycle(tradableSymbols);
+
+            //7. log
+            for(OrderDto order: TradeService.getOrderDtoList()) {
+                log.info("**Order list: {}", order.getSymbol());
+            }
         } catch (Exception e) {
             log.error("MarketData pipeline failed", e);
         }
@@ -71,7 +83,7 @@ public class MarketDataPipelineService {
     public void runTradingCycle(Set<SymbolInfo> tradableSymbols) {
         if (latestResult == null) return;
 
-        int freeSlots = tradingConfig.maxTrade() - TradeService.getActiveTrades().size();
+        int freeSlots = tradingConfig.maxTrade() - TradeService.getActiveOrderList().size();
         if (freeSlots <= 0) return;
 
         int topLimit = (int) Math.ceil(freeSlots / 2.0);   // felső lista kapja a kerekítést
@@ -102,4 +114,53 @@ public class MarketDataPipelineService {
             });
     }
 
+    public void calculateProfit(String message) {
+        List<BinanceTickerData> tickers = parser.parseMarketMessage(message);
+        if (tickers.isEmpty()) return;
+
+        for (OrderDto order : TradeService.getActiveOrderList()) {
+            tickers.stream()
+                    .filter(t -> t.getSymbol().equalsIgnoreCase(order.getSymbol()))
+                    .findFirst()
+                    .ifPresent(ticker -> {
+                        BigDecimal currentPrice = BigDecimal.valueOf(ticker.getLastPrice());
+
+                        BigDecimal entryPrice = order.getAvgPrice() != null && order.getAvgPrice().compareTo(BigDecimal.ZERO) > 0
+                                ? order.getAvgPrice()
+                                : order.getPrice();
+
+                        BigDecimal qty = order.getExecutedQty() != null && order.getExecutedQty().compareTo(BigDecimal.ZERO) > 0
+                                ? order.getExecutedQty()
+                                : order.getOrigQty();
+
+                        // long vagy short?
+                        boolean isLong = order.getSide() == OrderSide.BUY;
+
+                        BigDecimal pnlPercent;
+                        if (isLong) {
+                            pnlPercent = currentPrice.subtract(entryPrice)
+                                    .divide(entryPrice, RoundingMode.HALF_UP);
+                        } else { // short
+                            pnlPercent = entryPrice.subtract(currentPrice)
+                                    .divide(entryPrice, RoundingMode.HALF_UP);
+                        }
+
+                        // log vagy adatgyűjtés
+                        log.info("Symbol: {} | Entry: {} | Last: {} | Qty: {} | Unrealized PnL: {}",
+                                order.getSymbol(),
+                                entryPrice,
+                                currentPrice,
+                                qty,
+                                pnlPercent.setScale(4, RoundingMode.HALF_UP));
+
+                        if (pnlPercent.compareTo(BigDecimal.valueOf(tradingConfig.stopLimit())) <= 0) {
+                            log.info("STOP triggered on {} at {}% -> closing trade", order.getSymbol(), pnlPercent);
+                            tradeService.closeOrder(order);
+                        } else if (pnlPercent.compareTo(BigDecimal.valueOf(tradingConfig.winLimit())) >= 0) {
+                            log.info("WIN triggered on {} at {}% -> closing trade", order.getSymbol(), pnlPercent);
+                            tradeService.closeOrder(order);
+                        }
+                    });
+        }
+    }
 }

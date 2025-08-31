@@ -4,10 +4,12 @@ import jakarta.annotation.PostConstruct;
 import kd.trading.bot.interfaces.AccountDataListener;
 import kd.trading.bot.interfaces.MarketDataListener;
 import kd.trading.bot.model.TradeDto;
+import kd.trading.bot.service.AccountProfitService;
 import kd.trading.bot.service.TradableSymbolService;
 import kd.trading.bot.service.TradeService;
 import kd.trading.bot.service.MarketDataPipelineService;
 import kd.trading.bot.session.BinanceSessionManager;
+import kd.trading.bot.util.BinanceEventConverter;
 import kd.trading.bot.websocket.AccountWebSocketService;
 import kd.trading.bot.websocket.BinanceMarketWebSocketClient;
 import lombok.AccessLevel;
@@ -27,6 +29,9 @@ public class TradingBot implements MarketDataListener, AccountDataListener {
      TradableSymbolService tradableSymbolService;
      BinanceSessionManager sessionManager;
      MarketDataPipelineService pipelineService;
+     BinanceEventConverter converter;
+     AccountProfitService accountProfitService;
+
 
     @PostConstruct
     private void init() throws URISyntaxException {
@@ -43,26 +48,26 @@ public class TradingBot implements MarketDataListener, AccountDataListener {
 
     @Override
     public void onTradeData(String message) {
-        //rate coins and trade
-        log.debug(message);
-        pipelineService.processMessage(message, tradableSymbolService.getTradableSymbols());
-
-        for(TradeDto trade: TradeService.activeTrades) {
-            log.debug("Active trades symbols: {}", trade.getSymbol());
-        }
-
-        for(String symbol: TradeService.openTrades) {
-            log.debug("Open trades symbols: {}", symbol);
-        }
+        Object dto = converter.convert(message);
+        log.debug("dto :{}", dto);
+        accountProfitService.checkProfit(dto);
     }
 
+    /**
+     * Itt 5 percenként tradelünk
+     * @param message
+     */
     @Override
     public void onMarketData(String message) {
-
+        pipelineService.processMessage(message, tradableSymbolService.getTradableSymbols());
     }
 
+    /**
+     * Itt 25 másodpercenként jön marketről adat és itt nézük mennyi a profit és loss a coinon.
+     * @param message
+     */
     @Override
     public void onChangeData(String message) {
-
+        pipelineService.calculateProfit(message);
     }
 }

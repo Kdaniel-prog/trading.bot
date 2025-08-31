@@ -4,8 +4,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "trading")
 public record TradingConfig(
-        String stopLimit,
-        String winLimit,
+        Double stopLimit,
+        Double winLimit,
         String tradeWithPercent,
         Double moneyUsdt,
         Integer maxTrade,

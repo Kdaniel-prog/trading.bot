@@ -4,6 +4,7 @@ import kd.trading.bot.config.trading.TradingConfig;
 import kd.trading.bot.enums.Signal;
 import kd.trading.bot.model.SymbolInfo;
 import kd.trading.bot.model.TradeDto;
+import kd.trading.bot.service.TradableSymbolService;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
@@ -18,6 +19,7 @@ import java.time.Instant;
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 public class TradeServiceHelper {
     TradingConfig tradingConfig;
+    TradableSymbolService tradableSymbolService;
 
     public TradeDto generateTradeDto(Signal signal, BigDecimal lastPrice, SymbolInfo info) {
         int priceScale = info.getPriceScaleOrDefault();
@@ -30,14 +32,15 @@ public class TradeServiceHelper {
         double stopLimit;
         double winLimit;
         if (signal == Signal.LONG) {
-            stopLimit = lastPrice.doubleValue() * (1 - Double.parseDouble(tradingConfig.stopLimit()) / 100.0);
-            winLimit  = lastPrice.doubleValue() * (1 + Double.parseDouble(tradingConfig.winLimit()) / 100.0);
+            stopLimit = lastPrice.doubleValue() * (1 - tradingConfig.stopLimit() / 100.0);
+            winLimit  = lastPrice.doubleValue() * (1 + tradingConfig.winLimit() / 100.0);
         } else {
-            stopLimit = lastPrice.doubleValue() * (1 + Double.parseDouble(tradingConfig.stopLimit()) / 100.0);
-            winLimit  = lastPrice.doubleValue() * (1 - Double.parseDouble(tradingConfig.winLimit()) / 100.0);
+            stopLimit = lastPrice.doubleValue() * (1 + tradingConfig.stopLimit() / 100.0);
+            winLimit  = lastPrice.doubleValue() * (1 - tradingConfig.winLimit() / 100.0);
         }
 
         return TradeDto.builder()
+                .symbol(info)
                 .signal(signal)
                 .entryPrice(normalizedPrice)
                 .stopLimit(stopLimit)
@@ -77,5 +80,12 @@ public class TradeServiceHelper {
         if (adjusted.compareTo(maxQty) > 0) adjusted = maxQty;
 
         return adjusted;
+    }
+
+    public SymbolInfo getSymbolInfo(String symbol) {
+        return tradableSymbolService.getTradableSymbols().stream()
+                .filter(i -> i.getSymbol().equals(symbol))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("No SymbolInfo found for symbol: " + symbol));
     }
 }

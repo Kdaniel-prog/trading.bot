@@ -1,10 +1,13 @@
 package kd.trading.bot.service;
 
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import kd.trading.bot.api.BinanceRestClient;
 import kd.trading.bot.config.trading.TradingConfig;
+import kd.trading.bot.enums.OrderSide;
 import kd.trading.bot.enums.Signal;
 import kd.trading.bot.enums.TradeStatus;
+import kd.trading.bot.model.OrderDto;
 import kd.trading.bot.model.SymbolInfo;
 import kd.trading.bot.model.TradeDto;
 import kd.trading.bot.util.TradeServiceHelper;
@@ -13,6 +16,7 @@ import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
+import org.jetbrains.annotations.NotNull;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -32,27 +36,37 @@ public class TradeService {
     TradeServiceHelper helper;
 
     @Getter
-    public static final List<TradeDto> activeTrades = new CopyOnWriteArrayList<>();
-    public static final Set<String> openTrades = ConcurrentHashMap.newKeySet();
+    public static final List<OrderDto> orderDtoList = new CopyOnWriteArrayList<>();
+    @Getter
+    public static final List<OrderDto> activeOrderList = new CopyOnWriteArrayList<>();
 
     // --- queue + worker thread ---
     private final BlockingQueue<Runnable> tradeQueue = new LinkedBlockingQueue<>();
-    private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private final ExecutorService workerPool  = Executors.newFixedThreadPool(4);
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
 
     @PostConstruct
     public void initWorker() {
-        worker.submit(this::processTrades);
+        for (int i = 0; i < 4; i++) {
+            workerPool.submit(this::processTrades);
+        }
+    }
+
+    @PreDestroy
+    public void shutdownWorker() {
+        log.info("Shutting down TradeService worker...");
+        workerPool.shutdownNow();
+        scheduler.shutdownNow();
     }
 
     private void processTrades() {
-        while (true) {
+        while (!Thread.currentThread().isInterrupted()) {
             try {
                 Runnable task = tradeQueue.take();
                 task.run();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 log.warn("Trade worker interrupted, exiting.");
-                break;
             } catch (Exception e) {
                 log.error("Unexpected error in trade worker", e);
             }
@@ -65,7 +79,7 @@ public class TradeService {
     }
 
     private void makeTrade(Signal signal, BigDecimal lastPrice, SymbolInfo info) {
-        if (activeTrades.size() >= tradingConfig.maxTrade()) {
+        if (orderDtoList.size() >= tradingConfig.maxTrade()) {
             log.info("Max trades reached, skipping {}", info.getSymbol());
             return;
         }
@@ -75,43 +89,72 @@ public class TradeService {
             return;
         }
 
+        //todo lehet kell ez a dto
         TradeDto trade = helper.generateTradeDto(signal, lastPrice, info);
 
-        TradeStatus status = restClient.placeOrder(
+        OrderDto orderDto = restClient.placeOrder(
                 info.getSymbol(),
                 trade.getQuantity(),
                 trade.getEntryPrice(),
                 signal
         );
 
-        if (status == TradeStatus.SUCCESS) {
-            activeTrades.add(trade);
-        } else if (status == TradeStatus.OPEN) {
-            openTrades.add(info.getSymbol());
-        }
+        orderDtoList.add(orderDto);
+
+        // ha 1 perc múlva sincs update, akkor töröljük
+        scheduler.schedule(() -> {
+            if (orderDtoList.contains(orderDto)) {
+                log.info("Order {} timed out -> attempting cancel on Binance", orderDto.getSymbol());
+
+                boolean canceled = restClient.cancelOrdersForSymbol(orderDto.getSymbol());
+                if (canceled) {
+                    orderDtoList.remove(orderDto);
+                    log.info("Order {} removed from list after successful cancel", orderDto.getSymbol());
+                } else {
+                    log.warn("Failed to cancel order {} on Binance -> keeping in list", orderDto.getSymbol());
+                }
+            }
+        }, 1, TimeUnit.MINUTES);
     }
 
     public void closeOpenTrades() {
-        // 1. Nyitott, de még nem teljesült megbízások törlése
-        if (!openTrades.isEmpty()) {
-            List<String> toRemove = new ArrayList<>();
-            for (String symbol : openTrades) {
-                log.info("Close open order: {}", symbol);
-                boolean success = restClient.cancelOrdersForSymbol(symbol);
-                if (success) {
-                    toRemove.add(symbol);
-                }
-            }
-            toRemove.forEach(openTrades::remove);
-        }
+        log.debug("todo close open trades");
 
     }
 
     private Boolean checkIfContainsSymbol(String symbol) {
-        return activeTrades.stream()
-                .map(t -> t.getSymbol().getSymbol())
-                .anyMatch(s -> s.equals(symbol));
+        return orderDtoList.stream()
+                .map(OrderDto::getSymbol)
+                .anyMatch(symbol::equals);
     }
 
 
+    public void moveOrderToActive(@NotNull OrderDto orderDto) {
+        if (orderDtoList.remove(orderDto)) {
+            activeOrderList.add(orderDto);
+            log.info("Order moved to ACTIVE: {} (id: {})", orderDto.getSymbol(), orderDto.getOrderId());
+        }
+        log.debug("Pending order not found: {} (id: {})", orderDto.getSymbol(), orderDto.getOrderId());
+    }
+
+    public void closeOrder(OrderDto order) {
+        try {
+            BigDecimal qty = order.getExecutedQty().signum() > 0
+                    ? order.getExecutedQty()
+                    : order.getOrigQty();
+
+            SymbolInfo info = helper.getSymbolInfo(order.getSymbol()); // pl. cache-ből, ha van
+            Signal signal = order.getSide() == OrderSide.BUY ? Signal.LONG : Signal.SHORT;
+
+            boolean ok = restClient.closeMarketOrder(info, qty, signal);
+            if (ok) {
+                log.info("Closed order {} on {}", order.getOrderId(), order.getSymbol());
+                activeOrderList.remove(order);
+            } else {
+                log.warn("Failed to close order {} on {}", order.getOrderId(), order.getSymbol());
+            }
+        } catch (Exception e) {
+            log.error("Exception while closing order {}", order.getSymbol(), e);
+        }
+    }
 }

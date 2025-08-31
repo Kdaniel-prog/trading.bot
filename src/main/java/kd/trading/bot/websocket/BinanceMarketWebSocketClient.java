@@ -58,7 +58,6 @@ public class BinanceMarketWebSocketClient extends WebSocketClient {
 
     @Override
     public void onMessage(String message) {
-
         long now = System.currentTimeMillis();
 
         //Check active trades

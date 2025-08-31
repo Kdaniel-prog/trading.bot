@@ -6,9 +6,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import kd.trading.bot.config.binance.BinanceConfig;
 import kd.trading.bot.config.trading.TradingConfig;
 import kd.trading.bot.enums.Signal;
-import kd.trading.bot.enums.TradeStatus;
 import kd.trading.bot.model.ExchangeInfo;
+import kd.trading.bot.model.OrderDto;
 import kd.trading.bot.model.SymbolInfo;
+import kd.trading.bot.util.MessageParser;
 import kd.trading.bot.util.SignatureUtil;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -42,6 +44,7 @@ public class BinanceRestClient {
     HttpClient client;
     SignatureUtil util;
     TradingConfig tradingConfig;
+    MessageParser parser;
 
     public List<SymbolInfo> getBinanceTradableSymbols() {
         try {
@@ -153,7 +156,7 @@ public class BinanceRestClient {
         }
     }
 
-    public TradeStatus placeOrder(String symbol, BigDecimal qty, BigDecimal price, Signal signal) {
+    public OrderDto placeOrder(String symbol, BigDecimal qty, BigDecimal price, Signal signal) {
         try {
             String side = signal == Signal.LONG ? "BUY" : "SELL";
 
@@ -181,23 +184,19 @@ public class BinanceRestClient {
 
             if (resp == null || resp.body() == null) {
                 log.error("Null or empty HTTP response for symbol {}", symbol);
-                return TradeStatus.ERROR;
+                return new OrderDto();
             }
 
-            if (resp.body().contains("\"executedQty\":\"0\"")) {
-                return TradeStatus.OPEN;
-            }
-            log.debug("HERE: {}",resp.body());
-            return TradeStatus.SUCCESS;
+            return parser.parseOrder(resp.body());
 
         } catch (Exception e) {
             String msg = (e.getMessage() != null) ? e.getMessage() : e.toString();
             log.error("Error placing order for {}: {}", symbol, msg, e);
-            return TradeStatus.ERROR;
+            return new OrderDto();
         }
     }
 
-    public Boolean cancelOrdersForSymbol(String symbol) {
+    public boolean cancelOrdersForSymbol(String symbol) {
         try {
             Map<String, String> params = new LinkedHashMap<>();
             params.put("symbol", symbol);
@@ -214,13 +213,57 @@ public class BinanceRestClient {
                     .DELETE()
                     .build();
 
-            Optional<HttpResponse<String>> response;
-            response = Optional.ofNullable(client.send(request, HttpResponse.BodyHandlers.ofString()));
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
-            return response.isPresent() && response.get().statusCode() == 200;
+            int status = response.statusCode();
+            if (status == 200) {
+                log.info("Successfully canceled all open orders for symbol: {}", symbol);
+                return true;
+            } else {
+                log.warn("Failed to cancel orders for symbol: {} | status code: {} | body: {}",
+                        symbol, status, response.body());
+                return false;
+            }
+
         } catch (Exception e) {
             String msg = (e.getMessage() != null) ? e.getMessage() : e.toString();
-            log.error("Error canceling orders for symbols: {}", msg, e);
+            log.error("Error canceling orders for symbol: {}", symbol, e);
+            return false;
+        }
+    }
+
+    public boolean closeMarketOrder(SymbolInfo info, BigDecimal qty, Signal signal) {
+        try {
+            int qtyScale = info.getQuantityScaleOrDefault();
+            BigDecimal normalizedQty = qty.setScale(qtyScale, RoundingMode.DOWN);
+
+            // Ha LONG pozíciót nyitottunk (BUY), akkor záráshoz SELL kell
+            String side = signal == Signal.LONG ? "SELL" : "BUY";
+
+            Map<String, String> params = new LinkedHashMap<>();
+            params.put("symbol", info.getSymbol());
+            params.put("side", side);
+            params.put("type", "MARKET");
+            params.put("quantity", normalizedQty.stripTrailingZeros().toPlainString());
+            params.put("reduceOnly", "true"); // !!! fontos, nehogy új pozíciót nyisson
+            params.put("timestamp", String.valueOf(System.currentTimeMillis()));
+
+            String queryString = buildQueryString(params);
+            String signature = util.sign(queryString);
+
+            String finalUrl = config.restBaseUrl() + "/fapi/v1/order?" + queryString + "&signature=" + signature;
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(finalUrl))
+                    .header("X-MBX-APIKEY", config.apiKey())
+                    .POST(HttpRequest.BodyPublishers.noBody())
+                    .build();
+
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            return response.body().contains("orderId");
+        } catch (Exception e) {
+            log.error("Error closing market order for {}", info.getSymbol(), e);
             return false;
         }
     }

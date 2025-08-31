@@ -19,6 +19,11 @@ public class BinanceSessionManager {
     String listenKey;
     final BinanceRestClient restClient;
 
+    @PostConstruct
+    public void init() {
+        createListenKey();
+    }
+
     private void createListenKey() {
         try {
             listenKey = restClient.createListenKey();
