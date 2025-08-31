@@ -124,38 +124,6 @@ public class BinanceRestClient {
         }
     }
 
-    public List<SymbolInfo> getTradableSymbols() {
-        try {
-            String url = config.restBaseUrl() + "/fapi/v1/exchangeInfo";
-
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .GET()
-                    .build();
-
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-
-            ExchangeInfo exchangeInfo = mapper.readValue(response.body(), ExchangeInfo.class);
-
-            if (exchangeInfo == null || exchangeInfo.getSymbols() == null) {
-                throw new RuntimeException("Exchange info not available");
-            }
-
-            // cutoff dátum = most - 120 nap
-            Instant cutoff = Instant.now().minus(120, java.time.temporal.ChronoUnit.DAYS);
-
-            return exchangeInfo.getSymbols().stream()
-                    .filter(s -> "TRADING".equals(s.getStatus()))
-                    .filter(s -> tradingConfig.coinType().equals(s.getQuoteAsset()))
-                    .filter(s -> Instant.ofEpochMilli(s.getOnboardDate()).isBefore(cutoff)) // 4 hónap filter
-                    .toList();
-
-        } catch (Exception e) {
-            log.error("Failed to fetch exchangeInfo", e);
-            return List.of();
-        }
-    }
-
     public OrderDto placeOrder(String symbol, BigDecimal qty, BigDecimal price, Signal signal) {
         try {
             String side = signal == Signal.LONG ? "BUY" : "SELL";

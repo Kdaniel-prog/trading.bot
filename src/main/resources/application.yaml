@@ -16,7 +16,7 @@ trading:
   maxTrade: 5
   coinMinMonth: 4
   coinType: USDT
-
+  leverage: 20 #ez binancen x20 van nekem alapből.
 
 realBinance:
   restBaseUrl: https://fapi.binance.com

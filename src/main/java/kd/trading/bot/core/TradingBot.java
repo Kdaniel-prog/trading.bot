@@ -4,10 +4,7 @@ import jakarta.annotation.PostConstruct;
 import kd.trading.bot.interfaces.AccountDataListener;
 import kd.trading.bot.interfaces.MarketDataListener;
 import kd.trading.bot.model.TradeDto;
-import kd.trading.bot.service.AccountProfitService;
-import kd.trading.bot.service.TradableSymbolService;
-import kd.trading.bot.service.TradeService;
-import kd.trading.bot.service.MarketDataPipelineService;
+import kd.trading.bot.service.*;
 import kd.trading.bot.session.BinanceSessionManager;
 import kd.trading.bot.util.BinanceEventConverter;
 import kd.trading.bot.websocket.AccountWebSocketService;
@@ -31,6 +28,7 @@ public class TradingBot implements MarketDataListener, AccountDataListener {
      MarketDataPipelineService pipelineService;
      BinanceEventConverter converter;
      AccountProfitService accountProfitService;
+     TradeCheckingService checkingService;
 
 
     @PostConstruct
@@ -68,6 +66,6 @@ public class TradingBot implements MarketDataListener, AccountDataListener {
      */
     @Override
     public void onChangeData(String message) {
-        pipelineService.calculateProfit(message);
+        checkingService.calculateProfit(message);
     }
 }

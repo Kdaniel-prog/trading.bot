@@ -10,6 +10,7 @@ public record TradingConfig(
         Double moneyUsdt,
         Integer maxTrade,
         String coinType,
-        Integer coinMinMonth
+        Integer coinMinMonth,
+        Integer leverage
 ) {
 }

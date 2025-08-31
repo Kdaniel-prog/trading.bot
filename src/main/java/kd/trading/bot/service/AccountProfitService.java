@@ -16,6 +16,10 @@ public class AccountProfitService {
     private final TradeService tradeService;
     private double profit = 0.0;
 
+    /**
+     * Itt mozgatjuk openről. activra vagy closoljuk a tradet. plusz profit számolás.
+     * @param dto
+     */
     public void checkProfit(Object dto) {
         if (dto instanceof OrderTradeUpdateDto order) {
             String status = order.o.X;   // order status
@@ -25,7 +29,7 @@ public class AccountProfitService {
                 case "NEW":
                 case "PARTIALLY_FILLED":
                     // open -> még nem aktív, de figyeljük
-                    log.info("Order {} status: {}", symbol, status);
+                    //log.info("Order {} status: {}", symbol, status);
                     break;
 
                 case "FILLED":
