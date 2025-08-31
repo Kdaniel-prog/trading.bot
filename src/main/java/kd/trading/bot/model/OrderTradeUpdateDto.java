@@ -12,6 +12,7 @@ public class OrderTradeUpdateDto {
     public Order o;  // order data
 
     @JsonIgnoreProperties(ignoreUnknown = true)
+    @ToString
     public static class Order {
         public String s;  // symbol
         public String c;  // client order ID

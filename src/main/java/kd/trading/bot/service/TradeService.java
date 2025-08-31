@@ -128,13 +128,9 @@ public class TradeService {
                 .anyMatch(symbol::equals);
     }
 
-
-    public void moveOrderToActive(@NotNull OrderDto orderDto) {
-        if (orderDtoList.remove(orderDto)) {
-            activeOrderList.add(orderDto);
-            log.info("Order moved to ACTIVE: {} (id: {})", orderDto.getSymbol(), orderDto.getOrderId());
-        }
-        log.debug("Pending order not found: {} (id: {})", orderDto.getSymbol(), orderDto.getOrderId());
+    public void moveOrderToActive(OrderDto dto) {
+        orderDtoList.remove(dto);
+        activeOrderList.add(dto);
     }
 
     public void closeOrder(OrderDto order) {

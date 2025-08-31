@@ -37,7 +37,6 @@ public class MarketDataPipelineService {
     final TradingConfig tradingConfig;
     final TradeService tradeService;
 
-
     @Getter
     volatile RankingService.RankedCoins latestResult = new RankingService.RankedCoins(List.of(), List.of());
 
@@ -118,6 +117,9 @@ public class MarketDataPipelineService {
         List<BinanceTickerData> tickers = parser.parseMarketMessage(message);
         if (tickers.isEmpty()) return;
 
+        StringBuilder sb = new StringBuilder("\n====== Active Trades ======\n");
+        BigDecimal leverage = BigDecimal.valueOf(20); // fix x20
+
         for (OrderDto order : TradeService.getActiveOrderList()) {
             tickers.stream()
                     .filter(t -> t.getSymbol().equalsIgnoreCase(order.getSymbol()))
@@ -136,23 +138,25 @@ public class MarketDataPipelineService {
                         // long vagy short?
                         boolean isLong = order.getSide() == OrderSide.BUY;
 
-                        BigDecimal pnlPercent;
-                        if (isLong) {
-                            pnlPercent = currentPrice.subtract(entryPrice)
-                                    .divide(entryPrice, RoundingMode.HALF_UP);
-                        } else { // short
-                            pnlPercent = entryPrice.subtract(currentPrice)
-                                    .divide(entryPrice, RoundingMode.HALF_UP);
-                        }
+                        BigDecimal pnlAbs = isLong
+                                ? currentPrice.subtract(entryPrice).multiply(qty).multiply(leverage)
+                                : entryPrice.subtract(currentPrice).multiply(qty).multiply(leverage);
 
-                        // log vagy adatgyűjtés
-                        log.info("Symbol: {} | Entry: {} | Last: {} | Qty: {} | Unrealized PnL: {}",
+                        BigDecimal pnlPercent = pnlAbs
+                                .divide(entryPrice.multiply(qty), 6, RoundingMode.HALF_UP)
+                                .multiply(BigDecimal.valueOf(100));
+
+                        sb.append(String.format(
+                                "Symbol: %-8s | Entry: %-8s | Last: %-8s | Qty: %-6s | PnL: %6.2f%% (%s USDT)\n",
                                 order.getSymbol(),
-                                entryPrice,
-                                currentPrice,
+                                entryPrice.setScale(4, RoundingMode.HALF_UP),
+                                currentPrice.setScale(4, RoundingMode.HALF_UP),
                                 qty,
-                                pnlPercent.setScale(4, RoundingMode.HALF_UP));
+                                pnlPercent,
+                                pnlAbs.setScale(4, RoundingMode.HALF_UP)
+                        ));
 
+                        // stop / win check
                         if (pnlPercent.compareTo(BigDecimal.valueOf(tradingConfig.stopLimit())) <= 0) {
                             log.info("STOP triggered on {} at {}% -> closing trade", order.getSymbol(), pnlPercent);
                             tradeService.closeOrder(order);
@@ -162,5 +166,8 @@ public class MarketDataPipelineService {
                         }
                     });
         }
+
+        log.info(sb.toString());
     }
+
 }
