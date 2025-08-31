@@ -25,14 +25,15 @@ public class TradeCheckingService {
     final TradingConfig tradingConfig;
     final TradeService tradeService;
 
-    @Getter
     StringBuilder sb;
 
     public void calculateProfit(String message) {
         List<BinanceTickerData> tickers = parser.parseMarketMessage(message);
         if (tickers.isEmpty()) return;
 
-        sb = new StringBuilder("\n====== Active Trades ======\n");
+        sb = new StringBuilder();
+        sb.append("\n====== Active Trades ======\n");
+
         BigDecimal leverage = BigDecimal.valueOf(tradingConfig.leverage()); // fix x20
 
         for (OrderDto order : TradeService.getActiveOrderList()) {
@@ -79,10 +80,21 @@ public class TradeCheckingService {
                             log.info("WIN triggered on {} at {}% -> closing trade", order.getSymbol(), pnlPercent);
                             tradeService.closeOrder(order);
                         }
+
+                        if(TelegramCommandService.CANCEL_ORDERS) {
+                            tradeService.closeOrder(order);
+                        }
+
                     });
         }
 
-        log.info(sb.toString());
+        if(TelegramCommandService.CANCEL_ORDERS && TradeService.activeOrderList.isEmpty()) {
+            TelegramCommandService.CANCEL_ORDERS = false;
+        }
+    }
+
+    public String getTradeInfos() {
+        return sb.toString();
     }
 }
 

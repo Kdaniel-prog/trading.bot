@@ -1,6 +1,7 @@
 package kd.trading.bot.websocket;
 
 import kd.trading.bot.interfaces.AccountDataListener;
+import kd.trading.bot.service.TelegramCommandService;
 import lombok.AccessLevel;
 import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
@@ -55,6 +56,7 @@ public class AccountWebSocketService extends WebSocketClient  {
 
     @Override
     public void onMessage(String message) {
+        if(TelegramCommandService.SLEEP_MODE) return;
         this.accountDataListener.onTradeData(message);
     }
 

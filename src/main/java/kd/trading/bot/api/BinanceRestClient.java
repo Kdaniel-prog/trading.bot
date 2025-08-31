@@ -236,6 +236,7 @@ public class BinanceRestClient {
         }
     }
 
+
     private String buildQueryString(Map<String, String> params) {
         return params.entrySet().stream()
                 .map(e -> e.getKey() + "=" + URLEncoder.encode(e.getValue(), StandardCharsets.UTF_8))

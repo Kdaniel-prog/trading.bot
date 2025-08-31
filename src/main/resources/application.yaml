@@ -18,6 +18,12 @@ trading:
   coinType: USDT
   leverage: 20 #ez binancen x20 van nekem alapből.
 
+telegram:
+  username: zzpastabot
+  token: 8488123185:AAFBC7asn-iVC_pMs_8-l9hboc9n3BlCYpg
+  chat-ids:
+    - 7809477965
+
 realBinance:
   restBaseUrl: https://fapi.binance.com
   wsBaseUrl: wss://fstream.binance.com/ws

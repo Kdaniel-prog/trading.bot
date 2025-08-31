@@ -1,6 +1,7 @@
 package kd.trading.bot.websocket;
 
 import kd.trading.bot.interfaces.MarketDataListener;
+import kd.trading.bot.service.TelegramCommandService;
 import lombok.AccessLevel;
 import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
@@ -58,6 +59,7 @@ public class BinanceMarketWebSocketClient extends WebSocketClient {
 
     @Override
     public void onMessage(String message) {
+        if(TelegramCommandService.SLEEP_MODE) return;
         long now = System.currentTimeMillis();
 
         //Check active trades
