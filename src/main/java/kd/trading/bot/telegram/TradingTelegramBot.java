@@ -23,7 +23,7 @@ import java.util.List;
 
 @Component
 @RequiredArgsConstructor
-@FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
+@FieldDefaults(level = AccessLevel.PRIVATE ,makeFinal = true)
 public class TradingTelegramBot extends TelegramLongPollingBot implements ApplicationListener<ApplicationEvent> {
 
     AccountProfitService accountProfitService;
@@ -68,10 +68,10 @@ public class TradingTelegramBot extends TelegramLongPollingBot implements Applic
     private void handleCommand(String chatId, String command) {
         switch (command.toLowerCase()) {
             case "/start":
-                sendChatId(chatId, "Szia! 👋 Here is the quick buttons:");
+                sendChatId(chatId, "Hi! 👋 Here is the quick buttons:");
                 break;
             case "/chatid":
-                sendChatId(chatId, "A te chat ID-d: " + chatId);
+                sendChatId(chatId, "Your chat ID: " + chatId);
                 sendReplyKeyboard(chatId);
                 break;
             case "/profit":
@@ -134,16 +134,16 @@ public class TradingTelegramBot extends TelegramLongPollingBot implements Applic
         KeyboardButton profitButton = new KeyboardButton("/profit");
         KeyboardButton statsButton = new KeyboardButton("/stats");
         KeyboardButton tradesButton = new KeyboardButton("/trades list");
-        KeyboardButton cancelOrdersButton = new KeyboardButton("/cancel orders");
         KeyboardButton checkTrades = new KeyboardButton("/check trades");
         KeyboardButton sleepMode = new KeyboardButton("/sleep mode");
+        KeyboardButton cancelOrdersButton = new KeyboardButton("/cancel orders");
 
         KeyboardRow row1 = new KeyboardRow();
         row1.add(profitButton);
         row1.add(statsButton);
-        row1.add(cancelOrdersButton);
         row1.add(checkTrades);
         row1.add(sleepMode);
+        row1.add(cancelOrdersButton);
 
         KeyboardRow row2 = new KeyboardRow();
         row2.add(tradesButton);
@@ -156,6 +156,7 @@ public class TradingTelegramBot extends TelegramLongPollingBot implements Applic
 
         SendMessage message = SendMessage.builder()
                 .chatId(chatId)
+                .text("Keys")
                 .replyMarkup(keyboardMarkup)
                 .build();
 
