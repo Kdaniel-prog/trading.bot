@@ -74,10 +74,6 @@ public class TradingTelegramBot extends TelegramLongPollingBot implements Applic
                 sendChatId(chatId, "Your chat ID: " + chatId);
                 sendReplyKeyboard(chatId);
                 break;
-            case "/profit":
-                sendMessage("todo");
-                sendReplyKeyboard(chatId);
-                break;
             case "/stats":
                 sendMessage(accountProfitService.getProfitStatsReport());
                 sendReplyKeyboard(chatId);
@@ -131,7 +127,6 @@ public class TradingTelegramBot extends TelegramLongPollingBot implements Applic
     }
 
     public void sendReplyKeyboard(String chatId) {
-        KeyboardButton profitButton = new KeyboardButton("/profit");
         KeyboardButton statsButton = new KeyboardButton("/stats");
         KeyboardButton tradesButton = new KeyboardButton("/trades list");
         KeyboardButton checkTrades = new KeyboardButton("/check trades");
@@ -139,7 +134,6 @@ public class TradingTelegramBot extends TelegramLongPollingBot implements Applic
         KeyboardButton cancelOrdersButton = new KeyboardButton("/cancel orders");
 
         KeyboardRow row1 = new KeyboardRow();
-        row1.add(profitButton);
         row1.add(statsButton);
         row1.add(checkTrades);
         row1.add(sleepMode);

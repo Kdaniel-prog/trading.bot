@@ -143,8 +143,6 @@ public class AccountProfitService {
         double winRate = totalTrades > 0 ? (winTrades * 100.0 / totalTrades) : 0.0;
         stats.append(String.format("Win rate: %.2f%%%n", winRate));
         stats.append(String.format("Accumulated profit: %.4f USDT%n", profit));
-
-        log.info(stats.toString());
         return stats.toString();
     }
 
