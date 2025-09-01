@@ -1,9 +1,9 @@
 package kd.trading.bot.service;
 
-import kd.trading.bot.model.AccountUpdateDto;
+import kd.trading.bot.mapper.OrderMapper;
+import kd.trading.bot.model.BadSymbolsDto;
 import kd.trading.bot.model.OrderDto;
 import kd.trading.bot.model.OrderTradeUpdateDto;
-import kd.trading.bot.model.TradeLiteDto;
 import kd.trading.bot.telegram.eventType.TradeClosedUpdateEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -11,7 +11,10 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.Objects;
+
+import static kd.trading.bot.service.TradeService.BAD_SYMBOL_LIST;
 
 @Service
 @RequiredArgsConstructor
@@ -32,38 +35,49 @@ public class AccountProfitService {
         all = new StringBuilder();
 
         if (dto instanceof OrderTradeUpdateDto order) {
+            log.warn("{}", dto);
 
-            log.warn("{}",dto);
-            // először mindig update TradeService
-            tradeService.handleOrderUpdate(order);
+            String status = order.o.X;   // Order státusz (FILLED, NEW, stb.)
+            String execType = order.o.x; // Execution type (TRADE, NEW, EXPIRED, stb.)
+            String type = order.o.o;     // Order típus (MARKET, LIMIT)
+            String symbol = order.o.s;
 
-            String status = order.o.X;   // Order státusz
-            String type = order.o.o; // Order Type
-            String symbol = order.o.s;   // pl. BTCUSDT
-            String side = order.o.S;     // BUY vagy SELL
-            String positionSide = order.o.ps != null ? order.o.ps : "BOTH"; // Futures position side
+            double realizedProfit = parseProfit(order.o.rp);
 
-            double realizedProfit = parseProfit(order.o.rp); // ha zárás, itt jön a profit
+            if ("FILLED".equals(status)) {
+                if ("TRADE".equals(execType)) {
+                    // Ez tényleg trade lezárás -> profit számítás
+                    if (realizedProfit != 0.0) {
 
-            //activeba kerül
-            // S=SELL ez mindig az ellenkezője ha vételköz longoltunk buy volt akkor eladáskor S=SELL lesz.
-            if (status.equals("FILLED")) {
-                if ("MARKET".equals(type)) {
-                    tradeClosedUpdated(
-                            String.format("🚀 New trade opened:\n%s",
-                                    formatTradeDetails(order.o)));
-                } else if ("TRADE".equals(type)) {
-                    // Short záródik
-                    profit += realizedProfit;
-                    updateWinLose(realizedProfit);
-                    tradeClosedUpdated(
-                            String.format("✅ SHORT trade closed:\n%s\nProfit/Loss: %.2f USDT | Total profit: %.2f USDT",
-                                    formatTradeDetails(order.o),
-                                    realizedProfit,
-                                    profit));
+                        if (realizedProfit < 0) {
+                            BAD_SYMBOL_LIST.add(BadSymbolsDto.builder()
+                                    .symbol(symbol)
+                                    .stamp(LocalDateTime.now())
+                                    .build());
+                        }
+                        
+                        profit += realizedProfit;
+                        updateWinLose(realizedProfit);
+
+                        tradeClosedUpdated(
+                                String.format("✅ Trade closed:\n%s\nProfit/Loss: %.2f USDT | Total profit: %.2f USDT",
+                                        formatTradeDetails(order.o),
+                                        realizedProfit,
+                                        profit));
+                        tradeService.removeFromActiveBySymbol(symbol);
+                    } else {
+                        // New position
+                        tradeClosedUpdated(
+                                String.format("🚀 New LONG trade opened:\n%s",
+                                        formatTradeDetails(order.o)));
+
+                        OrderTradeUpdateDto.Order binanceOrder = order.o;
+                        OrderDto myOrder = OrderMapper.fromBinanceOrder(binanceOrder);
+                        tradeService.moveOrderToActive(myOrder);
+                    }
                 }
             } else {
-                log.debug("Unhandled status {} for {}", status, symbol);
+                log.debug("Unhandled status {} / execType {} for {}", status, execType, symbol);
             }
         }
     }
@@ -120,10 +134,11 @@ public class AccountProfitService {
         publisher.publishEvent(new TradeClosedUpdateEvent(this, message));
     }
 
+    //Az ellenkezőjét mutatja eladásnál.
     private String getDirectionLabel(String side) {
-        if ("BUY".equalsIgnoreCase(side)) {
+        if ("SELL".equalsIgnoreCase(side)) {
             return "🟢 LONG ";
-        } else if ("SELL".equalsIgnoreCase(side)) {
+        } else if ("BUY".equalsIgnoreCase(side)) {
             return "🔴 SHORT ";
         }
         return "❓ UNKNOWN";

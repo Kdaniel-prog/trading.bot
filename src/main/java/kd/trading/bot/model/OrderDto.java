@@ -5,6 +5,7 @@ import kd.trading.bot.enums.*;
 import lombok.Data;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 @Data
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -34,4 +35,5 @@ public class OrderDto {
     private SelfTradePreventionMode selfTradePreventionMode; // pl. EXPIRE_MAKER
     private Long goodTillDate;         // ha GTE_GTD, akkor meddig aktív
     private Long updateTime;           // utolsó frissítés időbélyeg
+    private LocalDateTime started;
 }

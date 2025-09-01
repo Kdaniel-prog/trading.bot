@@ -2,6 +2,7 @@ package kd.trading.bot.service;
 
 import kd.trading.bot.config.trading.TradingConfig;
 import kd.trading.bot.enums.OrderSide;
+import kd.trading.bot.model.BadSymbolsDto;
 import kd.trading.bot.model.BinanceTickerData;
 import kd.trading.bot.model.OrderDto;
 import kd.trading.bot.model.PnlResult;
@@ -14,9 +15,13 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
+import static kd.trading.bot.service.TradeService.BAD_SYMBOL_LIST;
 
 @Service
 @RequiredArgsConstructor
@@ -65,6 +70,23 @@ public class TradeCheckingService {
                         } else if (pnl.getPnlPercent().compareTo(BigDecimal.valueOf(tradingConfig.winLimit())) >= 0) {
                             log.info("WIN triggered on {} at {}% -> closing trade", order.getSymbol(), pnl.getPnlPercent());
                             tradeService.closeOrder(order);
+                        }
+                        if (order.getStarted() != null) {
+                            Duration openDuration = Duration.between(order.getStarted(), LocalDateTime.now());
+
+                            if (openDuration.toMinutes() >= 5) {
+                                BigDecimal absPercent = pnl.getPnlPercent().abs();
+
+                                if (absPercent.compareTo(BigDecimal.valueOf(1.5)) < 0) {
+                                    BAD_SYMBOL_LIST.add(BadSymbolsDto.builder()
+                                                    .symbol(order.getSymbol())
+                                                    .stamp(LocalDateTime.now())
+                                            .build());
+                                    log.info("TIMEOUT triggered on {} ({}min, pnl={}%) -> closing trade",
+                                            order.getSymbol(), openDuration.toMinutes(), pnl.getPnlPercent());
+                                    tradeService.closeOrder(order);
+                                }
+                            }
                         }
                     });
         }
@@ -123,6 +145,10 @@ public class TradeCheckingService {
         });
 
         return sb.toString();
+    }
+
+    public void closeTrade(OrderDto orderDto) {
+        tradeService.closeOrder(orderDto);
     }
 
     /**

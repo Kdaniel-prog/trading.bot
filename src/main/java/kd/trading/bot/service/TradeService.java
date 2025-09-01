@@ -5,12 +5,9 @@ import jakarta.annotation.PreDestroy;
 import kd.trading.bot.api.BinanceRestClient;
 import kd.trading.bot.config.trading.TradingConfig;
 import kd.trading.bot.enums.OrderSide;
-import kd.trading.bot.enums.PositionSide;
 import kd.trading.bot.enums.Signal;
-import kd.trading.bot.enums.TradeStatus;
-import kd.trading.bot.mapper.OrderMapper;
+import kd.trading.bot.model.BadSymbolsDto;
 import kd.trading.bot.model.OrderDto;
-import kd.trading.bot.model.OrderTradeUpdateDto;
 import kd.trading.bot.model.SymbolInfo;
 import kd.trading.bot.model.TradeDto;
 import kd.trading.bot.util.TradeServiceHelper;
@@ -19,14 +16,14 @@ import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
-import org.jetbrains.annotations.NotNull;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.util.ArrayList;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.*;
 
@@ -43,6 +40,8 @@ public class TradeService {
     public static final List<OrderDto> orderDtoList = new CopyOnWriteArrayList<>();
     @Getter
     public static final List<OrderDto> activeOrderList = new CopyOnWriteArrayList<>();
+
+    public static final Set<BadSymbolsDto> BAD_SYMBOL_LIST = new HashSet<>();
 
     // --- queue + worker thread ---
     private final BlockingQueue<Runnable> tradeQueue = new LinkedBlockingQueue<>();
@@ -61,6 +60,19 @@ public class TradeService {
         log.info("Shutting down TradeService worker...");
         workerPool.shutdownNow();
         scheduler.shutdownNow();
+    }
+
+    /**
+     * 60 percenként frissül a listenKey
+     */
+    @Scheduled(fixedRate = 20 * 60 * 1000)
+    public void refreshBadTrades() {
+        LocalDateTime now = LocalDateTime.now();
+
+        BAD_SYMBOL_LIST.removeIf(dto ->
+                Duration.between(dto.getStamp(), now).toMinutes() >= 60);
+
+        log.info("Bad symbol list refreshed, current size: {}", BAD_SYMBOL_LIST.size());
     }
 
     private void processTrades() {
@@ -120,8 +132,8 @@ public class TradeService {
         }, 2, TimeUnit.MINUTES);
     }
 
-
     public void moveOrderToActive(OrderDto orderDto) {
+        orderDto.setStarted(LocalDateTime.now());
         activeOrderList.add(orderDto);
         orderDtoList.removeIf(o -> o.getOrderId().equals(orderDto.getOrderId()));
         log.info("Order {} moved to active trades.", orderDto.getSymbol());
@@ -132,35 +144,7 @@ public class TradeService {
         log.info("Order {} removed from order list.", symbol);
     }
 
-    /**
-     * Központi handler, amit az AccountProfitService hív
-     */
-    public void handleOrderUpdate(OrderTradeUpdateDto order) {
-        String status = order.o.X;   // Order státusz
-        String type = order.o.o; // Order Type
-        String symbol = order.o.s;   // pl. BTCUSDT
-
-        //activeba kerül
-        // S=SELL ez mindig az ellenkezője ha vételköz longoltunk buy volt akkor eladáskor S=SELL lesz.
-        if (status.equals("FILLED")) {
-            if ("MARKET".equals(type)) {
-
-                OrderTradeUpdateDto.Order binanceOrder = order.o;
-                OrderDto myOrder = OrderMapper.fromBinanceOrder(binanceOrder);
-
-                moveOrderToActive(myOrder);
-
-
-            } else if ("TRADE".equals(type)) {
-                // Short záródik
-                removeFromActiveBySymbol(order.o.s); // csak itt törlünk
-            }
-        } else {
-            log.debug("Unhandled status {} for {}", status, symbol);
-        }
-    }
-
-    private void removeFromActiveBySymbol(String symbol) {
+    public void removeFromActiveBySymbol(String symbol) {
         activeOrderList.removeIf(o -> o.getSymbol().equals(symbol));
     }
 

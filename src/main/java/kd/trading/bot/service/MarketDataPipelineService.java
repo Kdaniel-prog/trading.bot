@@ -43,7 +43,8 @@ public class MarketDataPipelineService {
     public void processMessage(String message, Set<SymbolInfo> tradableSymbols) {
         try {
             //0. lépés nézzük meg hogy van e már 5 active tradünk
-            if(TradeService.getActiveOrderList().size() >= tradingConfig.maxTrade()) return;
+            if(TradeService.getActiveOrderList().size() >= tradingConfig.maxTrade() ||
+                    TradeService.getOrderDtoList().size() >= tradingConfig.maxTrade()) return;
 
             // 1. parse
             List<BinanceTickerData> tickers = parser.parseMarketMessage(message);
