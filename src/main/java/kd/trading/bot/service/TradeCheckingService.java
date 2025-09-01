@@ -6,7 +6,6 @@ import kd.trading.bot.model.BinanceTickerData;
 import kd.trading.bot.model.OrderDto;
 import kd.trading.bot.util.MessageParser;
 import lombok.AccessLevel;
-import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
@@ -15,6 +14,8 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -25,14 +26,19 @@ public class TradeCheckingService {
     final TradingConfig tradingConfig;
     final TradeService tradeService;
 
-    StringBuilder sb;
+    StringBuilder stats;
 
     public void calculateProfit(String message) {
         List<BinanceTickerData> tickers = parser.parseMarketMessage(message);
+
+        Set<String> mySymbols = TradeService.getActiveOrderList().stream().map(OrderDto::getSymbol).collect(Collectors.toSet());
+
+        tickers = tickers.stream().filter(t -> mySymbols.contains(t.getSymbol())).toList();
+
         if (tickers.isEmpty()) return;
 
-        sb = new StringBuilder();
-        sb.append("\n====== Active Trades ======\n");
+        stats = new StringBuilder();
+        stats.append("\n====== Active Trades ======\n");
 
         BigDecimal leverage = BigDecimal.valueOf(tradingConfig.leverage()); // fix x20
 
@@ -62,8 +68,8 @@ public class TradeCheckingService {
                                 .divide(entryPrice.multiply(qty), 6, RoundingMode.HALF_UP)
                                 .multiply(BigDecimal.valueOf(100));
 
-                        sb.append(String.format(
-                                "Symbol: %-8s | Entry: %-8s | Last: %-8s | Qty: %-6s | PnL: %6.2f%% (%s USDT)\n",
+                        stats.append(String.format(
+                                "Symbol: %-8s | Entry: %-8s | Last: %-8s | Qty: %-6s | Profit: %6.2f%% (%s USDT)\n",
                                 order.getSymbol(),
                                 entryPrice.setScale(4, RoundingMode.HALF_UP),
                                 currentPrice.setScale(4, RoundingMode.HALF_UP),
@@ -81,20 +87,12 @@ public class TradeCheckingService {
                             tradeService.closeOrder(order);
                         }
 
-                        if(TelegramCommandService.CANCEL_ORDERS) {
-                            tradeService.closeOrder(order);
-                        }
-
                     });
-        }
-
-        if(TelegramCommandService.CANCEL_ORDERS && TradeService.activeOrderList.isEmpty()) {
-            TelegramCommandService.CANCEL_ORDERS = false;
         }
     }
 
     public String getTradeInfos() {
-        return sb.toString();
+        return stats.toString();
     }
 }
 

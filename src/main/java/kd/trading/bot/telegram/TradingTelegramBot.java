@@ -53,9 +53,6 @@ public class TradingTelegramBot extends TelegramLongPollingBot implements Applic
             handleCommand(chatId, update.getCallbackQuery().getData());
         }
 
-        if (chatId != null) {
-            sendReplyKeyboard(chatId);
-        }
     }
 
     @Override
@@ -144,13 +141,14 @@ public class TradingTelegramBot extends TelegramLongPollingBot implements Applic
 
         ReplyKeyboardMarkup keyboardMarkup = ReplyKeyboardMarkup.builder()
                 .keyboard(List.of(row1, row2))
-                .resizeKeyboard(true) // automatikusan méretezi
-                .oneTimeKeyboard(false) // NEM tűnik el első használat után
+                .resizeKeyboard(true)
+                .oneTimeKeyboard(false)
                 .build();
 
+        // Nem kell külön "Keys" szöveg
         SendMessage message = SendMessage.builder()
                 .chatId(chatId)
-                .text("Keys")
+                .text("🔘 Choose command:")
                 .replyMarkup(keyboardMarkup)
                 .build();
 

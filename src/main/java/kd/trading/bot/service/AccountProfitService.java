@@ -82,7 +82,7 @@ public class AccountProfitService {
 
                         // push Telegram
                         tradeClosedUpdated(
-                                String.format("✅ Trade closed: %s %s @ %s | P/L: %.4f USDT | Total profit: %.4f USDT | Symbol: %s",
+                                String.format("✅ Trade closed: %s %s @ %s | Profit/Lost: %.4f USDT | Total profit: %.4f USDT | Symbol: %s",
                                         order.o.S, order.o.q, order.o.p, realizedProfit, profit, symbol));
                     }
                     break;

@@ -13,8 +13,10 @@ import org.springframework.stereotype.Service;
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 public class TelegramCommandService {
     BinanceRestClient client;
+    TradeService tradeService;
+
     public static Boolean SLEEP_MODE = false;
-    public static Boolean CANCEL_ORDERS = false;
+
 
     public String switchMode() {
         SLEEP_MODE = !SLEEP_MODE;
@@ -23,7 +25,7 @@ public class TelegramCommandService {
 
     public String cancelAllOrders() {
         TradeService.getOrderDtoList().forEach(o-> client.cancelOrdersForSymbol(o.getSymbol()));
-
+        TradeService.getActiveOrderList().forEach(tradeService::closeOrder);
         return "All order canceled";
     }
 }

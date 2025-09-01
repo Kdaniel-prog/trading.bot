@@ -1,11 +1,13 @@
 package kd.trading.bot.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import kd.trading.bot.enums.*;
 import lombok.Data;
 
 import java.math.BigDecimal;
 
 @Data
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class OrderDto {
 
     private Long orderId;

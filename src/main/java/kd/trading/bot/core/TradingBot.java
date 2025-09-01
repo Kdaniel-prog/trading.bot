@@ -61,11 +61,13 @@ public class TradingBot implements MarketDataListener, AccountDataListener {
     }
 
     /**
-     * Itt 25 másodpercenként jön marketről adat és itt nézük mennyi a profit és loss a coinon.
+     * Itt x másodpercenként jön marketről adat és itt nézük mennyi a profit és loss a coinon.
      * @param message
      */
     @Override
     public void onChangeData(String message) {
-        checkingService.calculateProfit(message);
+        if(!TradeService.getActiveOrderList().isEmpty()){
+            checkingService.calculateProfit(message);
+        }
     }
 }
