@@ -13,7 +13,7 @@ trading:
   stopLimit: -10.0
   winLimit: 20.0
   moneyUsdt: 50
-  maxTrade: 5
+  maxTrade: 2
   coinMinMonth: 4
   coinType: USDT
   leverage: 20 #ez binancen x20 van nekem alapből.

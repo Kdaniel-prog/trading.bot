@@ -67,7 +67,7 @@ public class TradingBot implements MarketDataListener, AccountDataListener {
     @Override
     public void onChangeData(String message) {
         if(!TradeService.getActiveOrderList().isEmpty()){
-            checkingService.calculateProfit(message);
+            checkingService.calculateTradeInfos(message);
         }
     }
 }

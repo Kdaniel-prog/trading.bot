@@ -5,9 +5,11 @@ import jakarta.annotation.PreDestroy;
 import kd.trading.bot.api.BinanceRestClient;
 import kd.trading.bot.config.trading.TradingConfig;
 import kd.trading.bot.enums.OrderSide;
+import kd.trading.bot.enums.PositionSide;
 import kd.trading.bot.enums.Signal;
 import kd.trading.bot.enums.TradeStatus;
 import kd.trading.bot.model.OrderDto;
+import kd.trading.bot.model.OrderTradeUpdateDto;
 import kd.trading.bot.model.SymbolInfo;
 import kd.trading.bot.model.TradeDto;
 import kd.trading.bot.util.TradeServiceHelper;
@@ -108,17 +110,83 @@ public class TradeService {
 
                 boolean canceled = restClient.cancelOrdersForSymbol(orderDto.getSymbol());
                 if (canceled) {
-                    orderDtoList.remove(orderDto);
-                    log.info("Order {} removed from list after successful cancel", orderDto.getSymbol());
+                    removeFromOrders(orderDto.getSymbol());
                 } else {
                     log.warn("Failed to cancel order {} on Binance -> keeping in list", orderDto.getSymbol());
                 }
             }
-        }, 1, TimeUnit.MINUTES);
+        }, 10, TimeUnit.MINUTES);
     }
 
-    public void closeOpenTrades() {
-        log.debug("todo close open trades");
+
+    public void moveOrderToActive(OrderDto orderDto) {
+        orderDtoList.remove(orderDto);
+        activeOrderList.add(orderDto);
+        log.info("Order {} moved to active trades.", orderDto.getSymbol());
+    }
+
+    public void removeFromOrders(String symbol) {
+        orderDtoList.removeIf(o -> o.getSymbol().equals(symbol));
+        log.info("Order {} removed from order list.", symbol);
+    }
+
+    /**
+     * Központi handler, amit az AccountProfitService hív
+     */
+    public void handleOrderUpdate(OrderTradeUpdateDto orderUpdate) {
+        String status = orderUpdate.o.X;   // order status (NEW, FILLED, stb.)
+        String symbol = orderUpdate.o.s;   // pl. BTCUSDT
+        Long orderId = orderUpdate.o.i;    // Binance orderId
+        String side = orderUpdate.o.S;     // BUY vagy SELL
+
+        switch (status) {
+            case "NEW":
+                log.info("New Order {} ({}) status update: {}", symbol, orderId, status);
+            case "PARTIALLY_FILLED":
+                log.info("PARTIALLY_FILLED Order {} ({}) status update: {} side: {}", symbol, orderId, status, side);
+            case "FILLED":
+                log.info("Order {} ({}) status update: {} side: {}", symbol, orderId, status, side);
+                orderDtoList.stream()
+                        .filter(o -> o.getOrderId().equals(orderId))
+                        .findFirst()
+                        .ifPresent(order -> {
+                            if ("BUY".equals(side)) {
+                                if (order.getPositionSide() == PositionSide.SHORT) {
+                                    moveOrderToActive(order);
+                                    log.info("Order {} ({}) status: FILLED (BUY) -> active LONG trade", symbol, orderId);
+                                } else if (order.getPositionSide() == PositionSide.LONG) {
+                                    removeFromActiveById(orderId);
+                                    log.info("Order {} ({}) status: FILLED (BUY) -> closed SHORT trade", symbol, orderId);
+                                }
+                            } else if ("SELL".equals(side)) {
+                                if (order.getPositionSide() == PositionSide.LONG) {
+                                    moveOrderToActive(order);
+                                    log.info("Order {} ({}) status: FILLED (SELL) -> active SHORT trade", symbol, orderId);
+                                } else if (order.getPositionSide() == PositionSide.SHORT) {
+                                    removeFromActiveById(orderId);
+                                    log.info("Order {} ({}) status: FILLED (SELL) -> closed LONG trade", symbol, orderId);
+                                }
+                            }
+                        });
+                break;
+
+            case "CANCELED":
+            case "EXPIRED":
+                removeFromOrdersById(orderId);
+                log.info("Order {} ({}) removed due to {}", symbol, orderId, status);
+                break;
+
+            default:
+                log.warn("Unhandled order status {} for {} ({})", status, symbol, orderId);
+        }
+    }
+
+    private void removeFromOrdersById(Long orderId) {
+        orderDtoList.removeIf(o -> o.getOrderId().equals(orderId));
+    }
+
+    private void removeFromActiveById(Long orderId) {
+        activeOrderList.removeIf(o -> o.getOrderId().equals(orderId));
 
     }
 
@@ -127,10 +195,6 @@ public class TradeService {
                 || activeOrderList.stream().map(OrderDto::getSymbol).anyMatch(symbol::equals);
     }
 
-    public void moveOrderToActive(OrderDto dto) {
-        orderDtoList.remove(dto);
-        activeOrderList.add(dto);
-    }
 
     public void closeOrder(OrderDto order) {
         try {

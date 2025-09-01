@@ -31,5 +31,6 @@ public class OrderTradeUpdateDto {
         public String L;  // last filled price
         public String n;  // commission amount
         public String N;  // commission asset
+        public String ps;
     }
 }

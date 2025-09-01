@@ -23,118 +23,105 @@ public class AccountProfitService {
     private final ApplicationEventPublisher publisher;
 
     StringBuilder all;
-    StringBuilder sb;
     StringBuilder stats ;
 
     private int winTrades = 0;
     private int loseTrades = 0;
 
     public void controlOrderListsAndProfit(Object dto) {
-        sb = new StringBuilder();
         all = new StringBuilder();
 
         if (dto instanceof OrderTradeUpdateDto order) {
-            String status = order.o.X;   // order status
+            // csak a TradeService hívás + profit/telegram logika
+            tradeService.handleOrderUpdate(order);
+
+            String status = order.o.X;
             String symbol = order.o.s;
 
             switch (status) {
-                case "NEW":
-                case "PARTIALLY_FILLED":
-                    all.append(String.format("Order %s status: %s%n", symbol, status));
-                    break;
-
                 case "FILLED":
-                    String direction = getDirectionLabel(order.o.S);
-                    if ("BUY".equals(order.o.S)) {
-                        // BUY FILLED → átrakjuk az active trades listába
-                        TradeService.getOrderDtoList().stream()
-                                .filter(o -> o.getSymbol().equals(symbol))
-                                .findFirst()
-                                .ifPresent(orderDto -> {
-                                    tradeService.moveOrderToActive(orderDto);   // átrakás
-                                    log.info("Order {} filled as BUY -> moved to active.", symbol);
-                                });
-                        all.append(String.format("Order %s filled as BUY -> moved to active.%n", symbol));
-                        // push Telegram
-                        // open trade push
-                        tradeClosedUpdated(
-                                String.format("🚀 New trade opened:\n%s",
-                                        formatTradeDetails(order.o)));
+                    String side = order.o.S;  // BUY / SELL
+                    String positionSide = order.o.ps != null ? order.o.ps : "BOTH"; // ha van külön field (Binance futures-nél van ps)
 
-                    } else if ("SELL".equals(order.o.S)) {
-                        // SELL FILLED → trade lezárva, profit számítás
-                        double realizedProfit = 0.0;
-                        if (order.o.rp != null && !order.o.rp.isEmpty()) {
-                            realizedProfit = Double.parseDouble(order.o.rp);
+                    if ("BUY".equals(side)) {
+                        if ("LONG".equals(positionSide) || "BOTH".equals(positionSide)) {
+                            // Long nyílik
+                            all.append(String.format("Order %s filled as BUY (LONG) -> moved to active.%n", symbol));
+                            tradeClosedUpdated(
+                                    String.format("🚀 New LONG trade opened:\n%s",
+                                            formatTradeDetails(order.o)));
+                        } else if ("SHORT".equals(positionSide)) {
+                            // Short záródik
+                            double realizedProfit = parseProfit(order.o.rp);
                             profit += realizedProfit;
+                            updateWinLose(realizedProfit);
+
+                            all.append(String.format("Order %s filled as BUY (SHORT close) -> closed trade. Profit: %.4f%n",
+                                    symbol, realizedProfit));
+
+                            tradeClosedUpdated(
+                                    String.format("✅ SHORT Trade closed:\n%s\nProfit/Loss: %.2f USDT | Total profit: %.2f USDT",
+                                            formatTradeDetails(order.o),
+                                            realizedProfit,
+                                            profit));
                         }
+                    } else if ("SELL".equals(side)) {
+                        if ("SHORT".equals(positionSide)) {
+                            // Short nyílik
+                            all.append(String.format("Order %s filled as SELL (SHORT) -> moved to active.%n", symbol));
+                            tradeClosedUpdated(
+                                    String.format("🚀 New SHORT trade opened:\n%s",
+                                            formatTradeDetails(order.o)));
+                        } else if ("LONG".equals(positionSide) || "BOTH".equals(positionSide)) {
+                            // Long záródik
+                            double realizedProfit = parseProfit(order.o.rp);
+                            profit += realizedProfit;
+                            updateWinLose(realizedProfit);
 
-                        if (realizedProfit > 0) {
-                            winTrades++;
-                        } else if (realizedProfit < 0) {
-                            loseTrades++;
+                            all.append(String.format("Order %s filled as SELL (LONG close) -> closed trade. Profit: %.4f%n",
+                                    symbol, realizedProfit));
+
+                            tradeClosedUpdated(
+                                    String.format("✅ LONG Trade closed:\n%s\nProfit/Loss: %.2f USDT | Total profit: %.2f USDT",
+                                            formatTradeDetails(order.o),
+                                            realizedProfit,
+                                            profit));
                         }
-
-                        TradeService.getActiveOrderList().removeIf(o -> o.getSymbol().equals(symbol));
-
-                        all.append(String.format("Order %s filled as SELL -> closed trade. Profit: %.4f%n",
-                                symbol, realizedProfit));
-                        all.append(String.format("Trade closed: %s %s @ %s | Profit/Loss: %.4f%n",
-                                order.o.S, order.o.q, order.o.p, realizedProfit));
-                        all.append(String.format("Total accumulated profit: %.4f%n", profit));
-
-                        // push Telegram
-                        tradeClosedUpdated(
-                                String.format("✅ Trade closed:\n%s\nProfit/Loss: %.2f USDT | Total profit: %.2f USDT",
-                                        formatTradeDetails(order.o),
-                                        realizedProfit,
-                                        profit));
                     }
                     break;
-
-                case "CANCELED":
-                case "EXPIRED":
-                    TradeService.getOrderDtoList().removeIf(o -> o.getSymbol().equals(symbol));
-                    all.append(String.format("Order %s canceled/expired -> removed from order list%n", symbol));
-                    break;
-
-                default:
-                    all.append(String.format("Unhandled order status %s for %s%n", status, symbol));
             }
-
-        } else if (dto instanceof AccountUpdateDto acc) {
-            all.append(String.format("Account update: %s%n", acc));
-
-        } else if (dto instanceof TradeLiteDto order) {
-            all.append(String.format("Lite trade update for %s%n", order.s));
-
-        } else {
-            all.append(String.format("Unknown DTO received: %s%n", dto));
         }
-
-        // állapot összefoglaló
-        sb.append("*Active trades: ")
-                .append(
-                        TradeService.getActiveOrderList().stream()
-                                .map(OrderDto::getSymbol)
-                                .filter(Objects::nonNull)
-                                .toList()
-                )
-                .append("\n");
-
-        sb.append("*Order trades: ")
-                .append(
-                        TradeService.getOrderDtoList().stream()
-                                .map(OrderDto::getSymbol)
-                                .filter(Objects::nonNull)
-                                .toList()
-                )
-                .append("\n");
 
     }
 
+    private double parseProfit(String rp) {
+        return (rp != null && !rp.isEmpty()) ? Double.parseDouble(rp) : 0.0;
+    }
+
+    private void updateWinLose(double realizedProfit) {
+        if (realizedProfit > 0) winTrades++;
+        else if (realizedProfit < 0) loseTrades++;
+    }
+
     public String getTrades() {
-        return sb != null ? sb.toString() : "Nincs riport.";
+        StringBuilder sb = new StringBuilder();
+
+        // összefoglaló riport
+        sb.append("*Active trades: ")
+                .append(TradeService.getActiveOrderList().stream()
+                        .map(OrderDto::getSymbol)
+                        .filter(Objects::nonNull)
+                        .toList())
+                .append("\n");
+
+        sb.append("*Order trades: ")
+                .append(TradeService.getOrderDtoList().stream()
+                        .map(OrderDto::getSymbol)
+                        .filter(Objects::nonNull)
+                        .toList())
+                .append("\n");
+
+        return sb.toString();
     }
 
     public String getProfitStatsReport() {
