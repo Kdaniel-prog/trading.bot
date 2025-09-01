@@ -142,7 +142,50 @@ public class TradeService {
         String positionSide = orderUpdate.o.ps != null ? orderUpdate.o.ps : "BOTH"; // ha nincs ps, default BOTH
         double realizedProfit = parseProfit(orderUpdate.o.rp);
 
-        boolean isOpening = isIsOpening(positionSide, side, realizedProfit);
+        boolean isHedgeMode = !"BOTH".equals(positionSide);
+        boolean isOpening;
+        String tradeType; // "LONG" or "SHORT" - not used here but calculated for consistency
+
+        if (isHedgeMode) {
+            // Hedge mode logic
+            if ("LONG".equals(positionSide)) {
+                if ("BUY".equals(side)) {
+                    isOpening = true;
+                    tradeType = "LONG";
+                } else { // SELL
+                    isOpening = false;
+                    tradeType = "LONG";
+                }
+            } else { // SHORT
+                if ("SELL".equals(side)) {
+                    isOpening = true;
+                    tradeType = "SHORT";
+                } else { // BUY
+                    isOpening = false;
+                    tradeType = "SHORT";
+                }
+            }
+        } else {
+            // One-way mode logic
+            boolean isReducing = realizedProfit != 0.0;
+            if (isReducing) {
+                if ("BUY".equals(side)) {
+                    isOpening = false;
+                    tradeType = "SHORT"; // closing short
+                } else {
+                    isOpening = false;
+                    tradeType = "LONG"; // closing long
+                }
+            } else {
+                if ("BUY".equals(side)) {
+                    isOpening = true;
+                    tradeType = "LONG";
+                } else {
+                    isOpening = true;
+                    tradeType = "SHORT";
+                }
+            }
+        }
 
         switch (status) {
             case "NEW":
@@ -190,54 +233,6 @@ public class TradeService {
             default:
                 log.warn("Unhandled order status {} for {} ({})", status, symbol, orderId);
         }
-    }
-
-    private static boolean isIsOpening(String positionSide, String side, double realizedProfit) {
-        boolean isHedgeMode = !"BOTH".equals(positionSide);
-        boolean isOpening;
-        String tradeType; // "LONG" or "SHORT" - not used here but calculated for consistency
-
-        if (isHedgeMode) {
-            // Hedge mode logic
-            if ("LONG".equals(positionSide)) {
-                if ("BUY".equals(side)) {
-                    isOpening = true;
-                    tradeType = "LONG";
-                } else { // SELL
-                    isOpening = false;
-                    tradeType = "LONG";
-                }
-            } else { // SHORT
-                if ("SELL".equals(side)) {
-                    isOpening = true;
-                    tradeType = "SHORT";
-                } else { // BUY
-                    isOpening = false;
-                    tradeType = "SHORT";
-                }
-            }
-        } else {
-            // One-way mode logic
-            boolean isReducing = realizedProfit != 0.0;
-            if (isReducing) {
-                if ("BUY".equals(side)) {
-                    isOpening = false;
-                    tradeType = "SHORT"; // closing short
-                } else {
-                    isOpening = false;
-                    tradeType = "LONG"; // closing long
-                }
-            } else {
-                if ("BUY".equals(side)) {
-                    isOpening = true;
-                    tradeType = "LONG";
-                } else {
-                    isOpening = true;
-                    tradeType = "SHORT";
-                }
-            }
-        }
-        return isOpening;
     }
 
     private double parseProfit(String rp) {
