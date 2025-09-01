@@ -28,7 +28,7 @@ public class AccountProfitService {
     private int winTrades = 0;
     private int loseTrades = 0;
 
-    public void checkProfit(Object dto) {
+    public void controlOrderListsAndProfit(Object dto) {
         sb = new StringBuilder();
         all = new StringBuilder();
 
@@ -43,6 +43,7 @@ public class AccountProfitService {
                     break;
 
                 case "FILLED":
+                    String direction = getDirectionLabel(order.o.S);
                     if ("BUY".equals(order.o.S)) {
                         // BUY FILLED → átrakjuk az active trades listába
                         TradeService.getOrderDtoList().stream()
@@ -55,8 +56,8 @@ public class AccountProfitService {
                         all.append(String.format("Order %s filled as BUY -> moved to active.%n", symbol));
                         // push Telegram
                         tradeClosedUpdated(
-                                String.format("🚀 New trade opened: %s %s %s @ %s | Symbol: %s",
-                                        symbol, order.o.S, order.o.q, order.o.p, symbol));
+                                String.format("🚀 New trade opened: Symbol: %s | %s  | %s @ %s ",
+                                        symbol, direction, order.o.q, order.o.p));
 
                     } else if ("SELL".equals(order.o.S)) {
                         // SELL FILLED → trade lezárva, profit számítás
@@ -83,7 +84,7 @@ public class AccountProfitService {
                         // push Telegram
                         tradeClosedUpdated(
                                 String.format("✅ Trade closed: %s %s @ %s | Profit/Lost: %.4f USDT | Total profit: %.4f USDT | Symbol: %s",
-                                        order.o.S, order.o.q, order.o.p, realizedProfit, profit, symbol));
+                                        direction, order.o.q, order.o.p, realizedProfit, profit, symbol));
                     }
                     break;
 
@@ -152,5 +153,14 @@ public class AccountProfitService {
 
     public void tradeClosedUpdated(String message) {
         publisher.publishEvent(new TradeClosedUpdateEvent(this, message));
+    }
+
+    private String getDirectionLabel(String side) {
+        if ("BUY".equalsIgnoreCase(side)) {
+            return "🟢 LONG ";
+        } else if ("SELL".equalsIgnoreCase(side)) {
+            return "🔴 SHORT ";
+        }
+        return "❓ UNKNOWN";
     }
 }

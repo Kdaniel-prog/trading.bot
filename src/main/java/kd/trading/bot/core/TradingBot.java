@@ -48,7 +48,7 @@ public class TradingBot implements MarketDataListener, AccountDataListener {
     public void onTradeData(String message) {
         Object dto = converter.convert(message);
         log.debug("dto :{}", dto);
-        accountProfitService.checkProfit(dto);
+        accountProfitService.controlOrderListsAndProfit(dto);
     }
 
     /**
