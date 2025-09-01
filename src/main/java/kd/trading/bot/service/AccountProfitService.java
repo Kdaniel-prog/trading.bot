@@ -55,8 +55,8 @@ public class AccountProfitService {
                         all.append(String.format("Order %s filled as BUY -> moved to active.%n", symbol));
                         // push Telegram
                         tradeClosedUpdated(
-                                String.format("🚀 New trade opened: %s %s %s @ %s",
-                                        symbol, order.o.S, order.o.q, order.o.p));
+                                String.format("🚀 New trade opened: %s %s %s @ %s | Symbol: %s",
+                                        symbol, order.o.S, order.o.q, order.o.p, symbol));
 
                     } else if ("SELL".equals(order.o.S)) {
                         // SELL FILLED → trade lezárva, profit számítás
