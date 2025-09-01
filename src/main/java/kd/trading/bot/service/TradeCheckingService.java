@@ -31,7 +31,7 @@ public class TradeCheckingService {
     public void calculateProfit(String message) {
         List<BinanceTickerData> tickers = parser.parseMarketMessage(message);
 
-        Set<String> mySymbols = TradeService.getActiveOrderList().stream().map(OrderDto::getSymbol).collect(Collectors.toSet());
+        List<String> mySymbols = TradeService.getActiveOrderList().stream().map(OrderDto::getSymbol).toList();
 
         tickers = tickers.stream().filter(t -> mySymbols.contains(t.getSymbol())).toList();
 

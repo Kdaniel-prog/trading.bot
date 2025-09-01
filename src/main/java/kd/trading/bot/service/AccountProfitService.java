@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.util.Objects;
 
 @Service
@@ -55,9 +56,10 @@ public class AccountProfitService {
                                 });
                         all.append(String.format("Order %s filled as BUY -> moved to active.%n", symbol));
                         // push Telegram
+                        // open trade push
                         tradeClosedUpdated(
-                                String.format("🚀 New trade opened: Symbol: %s | %s  | %s @ %s ",
-                                        symbol, direction, order.o.q, order.o.p));
+                                String.format("🚀 New trade opened:\n%s",
+                                        formatTradeDetails(order.o)));
 
                     } else if ("SELL".equals(order.o.S)) {
                         // SELL FILLED → trade lezárva, profit számítás
@@ -83,8 +85,10 @@ public class AccountProfitService {
 
                         // push Telegram
                         tradeClosedUpdated(
-                                String.format("✅ Trade closed: %s %s @ %s | Profit/Lost: %.4f USDT | Total profit: %.4f USDT | Symbol: %s",
-                                        direction, order.o.q, order.o.p, realizedProfit, profit, symbol));
+                                String.format("✅ Trade closed:\n%s\nProfit/Loss: %.2f USDT | Total profit: %.2f USDT",
+                                        formatTradeDetails(order.o),
+                                        realizedProfit,
+                                        profit));
                     }
                     break;
 
@@ -162,5 +166,22 @@ public class AccountProfitService {
             return "🔴 SHORT ";
         }
         return "❓ UNKNOWN";
+    }
+
+    private String formatTradeDetails(OrderTradeUpdateDto.Order order) {
+        String direction = getDirectionLabel(order.S);
+        String symbol = order.s;
+        BigDecimal qty = new BigDecimal(order.q);
+        BigDecimal price = new BigDecimal(order.p);
+        BigDecimal totalUsdt = qty.multiply(price);
+
+        return String.format(
+                "%s | Symbol: %s | Qty: %s (≈ %.2f USDT) | Entry: %s",
+                direction,
+                symbol,
+                qty.stripTrailingZeros().toPlainString(),
+                totalUsdt,
+                price.stripTrailingZeros().toPlainString()
+        );
     }
 }
