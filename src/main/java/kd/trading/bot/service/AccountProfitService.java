@@ -23,7 +23,7 @@ public class AccountProfitService {
     private final ApplicationEventPublisher publisher;
 
     StringBuilder all;
-    StringBuilder stats ;
+    StringBuilder stats;
 
     private int winTrades = 0;
     private int loseTrades = 0;
@@ -32,66 +32,88 @@ public class AccountProfitService {
         all = new StringBuilder();
 
         if (dto instanceof OrderTradeUpdateDto order) {
-            // csak a TradeService hívás + profit/telegram logika
+            // először mindig update TradeService
             tradeService.handleOrderUpdate(order);
 
-            String status = order.o.X;
-            String symbol = order.o.s;
+            String status = order.o.X;   // Order státusz
+            String symbol = order.o.s;   // pl. BTCUSDT
+            String side = order.o.S;     // BUY vagy SELL
+            String positionSide = order.o.ps != null ? order.o.ps : "BOTH"; // Futures position side
+            double realizedProfit = parseProfit(order.o.rp); // ha zárás, itt jön a profit
+
+            boolean isHedgeMode = !"BOTH".equals(positionSide);
+            boolean isOpening;
+            String tradeType; // "LONG" or "SHORT"
+
+            if (isHedgeMode) {
+                // Hedge mode logic
+                if ("LONG".equals(positionSide)) {
+                    if ("BUY".equals(side)) {
+                        isOpening = true;
+                        tradeType = "LONG";
+                    } else { // SELL
+                        isOpening = false;
+                        tradeType = "LONG";
+                    }
+                } else { // SHORT
+                    if ("SELL".equals(side)) {
+                        isOpening = true;
+                        tradeType = "SHORT";
+                    } else { // BUY
+                        isOpening = false;
+                        tradeType = "SHORT";
+                    }
+                }
+            } else {
+                // One-way mode logic
+                boolean isReducing = realizedProfit != 0.0;
+                if (isReducing) {
+                    if ("BUY".equals(side)) {
+                        isOpening = false;
+                        tradeType = "SHORT"; // closing short
+                    } else {
+                        isOpening = false;
+                        tradeType = "LONG"; // closing long
+                    }
+                } else {
+                    if ("BUY".equals(side)) {
+                        isOpening = true;
+                        tradeType = "LONG";
+                    } else {
+                        isOpening = true;
+                        tradeType = "SHORT";
+                    }
+                }
+            }
 
             switch (status) {
                 case "FILLED":
-                    String side = order.o.S;  // BUY / SELL
-                    String positionSide = order.o.ps != null ? order.o.ps : "BOTH"; // ha van külön field (Binance futures-nél van ps)
+                    all.append(String.format("Order %s filled as %s (%s) -> ", symbol, side, positionSide));
+                    if (isOpening) {
+                        all.append("moved to active.\n");
+                        tradeClosedUpdated(
+                                String.format("🚀 New %s trade opened:\n%s",
+                                        tradeType,
+                                        formatTradeDetails(order.o)));
+                    } else {
+                        profit += realizedProfit;
+                        updateWinLose(realizedProfit);
 
-                    if ("BUY".equals(side)) {
-                        if ("LONG".equals(positionSide) || "BOTH".equals(positionSide)) {
-                            // Long nyílik
-                            all.append(String.format("Order %s filled as BUY (LONG) -> moved to active.%n", symbol));
-                            tradeClosedUpdated(
-                                    String.format("🚀 New LONG trade opened:\n%s",
-                                            formatTradeDetails(order.o)));
-                        } else if ("SHORT".equals(positionSide)) {
-                            // Short záródik
-                            double realizedProfit = parseProfit(order.o.rp);
-                            profit += realizedProfit;
-                            updateWinLose(realizedProfit);
+                        all.append(String.format("closed. Profit: %.4f\n", realizedProfit));
 
-                            all.append(String.format("Order %s filled as BUY (SHORT close) -> closed trade. Profit: %.4f%n",
-                                    symbol, realizedProfit));
-
-                            tradeClosedUpdated(
-                                    String.format("✅ SHORT Trade closed:\n%s\nProfit/Loss: %.2f USDT | Total profit: %.2f USDT",
-                                            formatTradeDetails(order.o),
-                                            realizedProfit,
-                                            profit));
-                        }
-                    } else if ("SELL".equals(side)) {
-                        if ("SHORT".equals(positionSide)) {
-                            // Short nyílik
-                            all.append(String.format("Order %s filled as SELL (SHORT) -> moved to active.%n", symbol));
-                            tradeClosedUpdated(
-                                    String.format("🚀 New SHORT trade opened:\n%s",
-                                            formatTradeDetails(order.o)));
-                        } else if ("LONG".equals(positionSide) || "BOTH".equals(positionSide)) {
-                            // Long záródik
-                            double realizedProfit = parseProfit(order.o.rp);
-                            profit += realizedProfit;
-                            updateWinLose(realizedProfit);
-
-                            all.append(String.format("Order %s filled as SELL (LONG close) -> closed trade. Profit: %.4f%n",
-                                    symbol, realizedProfit));
-
-                            tradeClosedUpdated(
-                                    String.format("✅ LONG Trade closed:\n%s\nProfit/Loss: %.2f USDT | Total profit: %.2f USDT",
-                                            formatTradeDetails(order.o),
-                                            realizedProfit,
-                                            profit));
-                        }
+                        tradeClosedUpdated(
+                                String.format("✅ %s Trade closed:\n%s\nProfit/Loss: %.2f USDT | Total profit: %.2f USDT",
+                                        tradeType,
+                                        formatTradeDetails(order.o),
+                                        realizedProfit,
+                                        profit));
                     }
                     break;
+
+                default:
+                    log.debug("Unhandled status {} for {}", status, symbol);
             }
         }
-
     }
 
     private double parseProfit(String rp) {
@@ -126,15 +148,15 @@ public class AccountProfitService {
 
     public String getProfitStatsReport() {
         stats = new StringBuilder();
-        int totalTrades = winTrades+loseTrades;
+        int totalTrades = winTrades + loseTrades;
         stats.append("====== Profit Statistics ======\n");
-        stats.append(String.format("Total trades: %d%n", totalTrades));
-        stats.append(String.format("Winning trades: %d%n", winTrades));
-        stats.append(String.format("Losing trades: %d%n", loseTrades));
+        stats.append(String.format("Total trades: %d\n", totalTrades));
+        stats.append(String.format("Winning trades: %d\n", winTrades));
+        stats.append(String.format("Losing trades: %d\n", loseTrades));
 
         double winRate = totalTrades > 0 ? (winTrades * 100.0 / totalTrades) : 0.0;
-        stats.append(String.format("Win rate: %.2f%%%n", winRate));
-        stats.append(String.format("Accumulated profit: %.4f USDT%n", profit));
+        stats.append(String.format("Win rate: %.2f%%\n", winRate));
+        stats.append(String.format("Accumulated profit: %.4f USDT\n", profit));
         return stats.toString();
     }
 
