@@ -24,6 +24,7 @@ public class OrderTradeUpdateDto {
         public String ap; // average price
         public String rp;
         public String x;  // execution type
+        public Boolean R;
         public String X;  // order status
         public long i;    // order ID
         public String l;  // last filled quantity

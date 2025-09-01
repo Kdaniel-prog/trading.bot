@@ -8,6 +8,7 @@ import kd.trading.bot.enums.OrderSide;
 import kd.trading.bot.enums.PositionSide;
 import kd.trading.bot.enums.Signal;
 import kd.trading.bot.enums.TradeStatus;
+import kd.trading.bot.mapper.OrderMapper;
 import kd.trading.bot.model.OrderDto;
 import kd.trading.bot.model.OrderTradeUpdateDto;
 import kd.trading.bot.model.SymbolInfo;
@@ -28,6 +29,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.*;
+
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -106,7 +108,6 @@ public class TradeService {
         // ha 1 perc múlva sincs update, akkor töröljük
         scheduler.schedule(() -> {
             if (orderDtoList.contains(orderDto)) {
-                assert orderDto != null;
                 log.info("Order {} timed out -> attempting cancel on Binance", orderDto.getSymbol());
 
                 boolean canceled = restClient.cancelOrdersForSymbol(orderDto.getSymbol());
@@ -121,8 +122,8 @@ public class TradeService {
 
 
     public void moveOrderToActive(OrderDto orderDto) {
-        orderDtoList.remove(orderDto);
         activeOrderList.add(orderDto);
+        orderDtoList.removeIf(o -> o.getOrderId().equals(orderDto.getOrderId()));
         log.info("Order {} moved to active trades.", orderDto.getSymbol());
     }
 
@@ -134,113 +135,29 @@ public class TradeService {
     /**
      * Központi handler, amit az AccountProfitService hív
      */
-    public void handleOrderUpdate(OrderTradeUpdateDto orderUpdate) {
-        String status = orderUpdate.o.X;   // order status (NEW, FILLED, stb.)
-        String symbol = orderUpdate.o.s;   // pl. BTCUSDT
-        Long orderId = orderUpdate.o.i;    // Binance orderId
-        String side = orderUpdate.o.S;     // BUY vagy SELL
-        String positionSide = orderUpdate.o.ps != null ? orderUpdate.o.ps : "BOTH"; // ha nincs ps, default BOTH
-        double realizedProfit = parseProfit(orderUpdate.o.rp);
+    public void handleOrderUpdate(OrderTradeUpdateDto order) {
+        String status = order.o.X;   // Order státusz
+        String type = order.o.o; // Order Type
+        String symbol = order.o.s;   // pl. BTCUSDT
 
-        boolean isHedgeMode = !"BOTH".equals(positionSide);
-        boolean isOpening;
-        String tradeType; // "LONG" or "SHORT" - not used here but calculated for consistency
+        //activeba kerül
+        // S=SELL ez mindig az ellenkezője ha vételköz longoltunk buy volt akkor eladáskor S=SELL lesz.
+        if (status.equals("FILLED")) {
+            if ("MARKET".equals(type)) {
 
-        if (isHedgeMode) {
-            // Hedge mode logic
-            if ("LONG".equals(positionSide)) {
-                if ("BUY".equals(side)) {
-                    isOpening = true;
-                    tradeType = "LONG";
-                } else { // SELL
-                    isOpening = false;
-                    tradeType = "LONG";
-                }
-            } else { // SHORT
-                if ("SELL".equals(side)) {
-                    isOpening = true;
-                    tradeType = "SHORT";
-                } else { // BUY
-                    isOpening = false;
-                    tradeType = "SHORT";
-                }
+                OrderTradeUpdateDto.Order binanceOrder = order.o;
+                OrderDto myOrder = OrderMapper.fromBinanceOrder(binanceOrder);
+
+                moveOrderToActive(myOrder);
+
+
+            } else if ("TRADE".equals(type)) {
+                // Short záródik
+                removeFromActiveBySymbol(order.o.s); // csak itt törlünk
             }
         } else {
-            // One-way mode logic
-            boolean isReducing = realizedProfit != 0.0;
-            if (isReducing) {
-                if ("BUY".equals(side)) {
-                    isOpening = false;
-                    tradeType = "SHORT"; // closing short
-                } else {
-                    isOpening = false;
-                    tradeType = "LONG"; // closing long
-                }
-            } else {
-                if ("BUY".equals(side)) {
-                    isOpening = true;
-                    tradeType = "LONG";
-                } else {
-                    isOpening = true;
-                    tradeType = "SHORT";
-                }
-            }
+            log.debug("Unhandled status {} for {}", status, symbol);
         }
-
-        switch (status) {
-            case "NEW":
-                log.info("New Order {} ({}) status: {}", symbol, orderId, status);
-                break;
-
-            case "PARTIALLY_FILLED":
-                log.info("Partially filled Order {} ({}) status: {} side: {}", symbol, orderId, status, side);
-                break;
-
-            case "FILLED":
-                log.info("Order {} ({}) FILLED side={} posSide={}", symbol, orderId, side, positionSide);
-
-                // ha pending listában volt → aktívba tesszük
-                Optional<OrderDto> dto = orderDtoList.stream()
-                        .filter(o -> o.getOrderId().equals(orderId))
-                        .findFirst();
-
-                if (isOpening) {
-                    if (dto.isPresent()) {
-                        moveOrderToActive(dto.get());
-                        log.info("Order {} -> moved to ACTIVE trades (opened position)", symbol);
-                    } else {
-                        log.warn("Opening order {} not found in pending list", symbol);
-                    }
-                } else {
-                    // Closing: remove from active by symbol
-                    removeFromActiveBySymbol(symbol);
-                    log.info("Order {} -> REMOVED from ACTIVE trades (closed position)", symbol);
-
-                    if (dto.isPresent()) {
-                        // If closing was somehow in pending, remove it
-                        removeFromOrdersById(orderId);
-                        log.info("Closing order {} removed from pending list", symbol);
-                    }
-                }
-                break;
-
-            case "CANCELED":
-            case "EXPIRED":
-                removeFromOrdersById(orderId);
-                log.info("Order {} ({}) removed due to {}", symbol, orderId, status);
-                break;
-
-            default:
-                log.warn("Unhandled order status {} for {} ({})", status, symbol, orderId);
-        }
-    }
-
-    private double parseProfit(String rp) {
-        return (rp != null && !rp.isEmpty()) ? Double.parseDouble(rp) : 0.0;
-    }
-
-    private void removeFromOrdersById(Long orderId) {
-        orderDtoList.removeIf(o -> o.getOrderId().equals(orderId));
     }
 
     private void removeFromActiveBySymbol(String symbol) {
@@ -251,7 +168,6 @@ public class TradeService {
         return orderDtoList.stream() .map(OrderDto::getSymbol).anyMatch(symbol::equals)
                 || activeOrderList.stream().map(OrderDto::getSymbol).anyMatch(symbol::equals);
     }
-
 
     public void closeOrder(OrderDto order) {
         try {
@@ -265,7 +181,7 @@ public class TradeService {
             boolean ok = restClient.closeMarketOrder(info, qty, signal);
             if (ok) {
                 log.info("Closed order {} on {}", order.getOrderId(), order.getSymbol());
-                // Note: We don't add closing orders to orderDtoList, but if you change that, adjust accordingly
+                activeOrderList.remove(order);
             } else {
                 log.warn("Failed to close order {} on {}", order.getOrderId(), order.getSymbol());
             }

@@ -32,86 +32,38 @@ public class AccountProfitService {
         all = new StringBuilder();
 
         if (dto instanceof OrderTradeUpdateDto order) {
+
+            log.warn("{}",dto);
             // először mindig update TradeService
             tradeService.handleOrderUpdate(order);
 
             String status = order.o.X;   // Order státusz
+            String type = order.o.o; // Order Type
             String symbol = order.o.s;   // pl. BTCUSDT
             String side = order.o.S;     // BUY vagy SELL
             String positionSide = order.o.ps != null ? order.o.ps : "BOTH"; // Futures position side
+
             double realizedProfit = parseProfit(order.o.rp); // ha zárás, itt jön a profit
 
-            boolean isHedgeMode = !"BOTH".equals(positionSide);
-            boolean isOpening;
-            String tradeType; // "LONG" or "SHORT"
-
-            if (isHedgeMode) {
-                // Hedge mode logic
-                if ("LONG".equals(positionSide)) {
-                    if ("BUY".equals(side)) {
-                        isOpening = true;
-                        tradeType = "LONG";
-                    } else { // SELL
-                        isOpening = false;
-                        tradeType = "LONG";
-                    }
-                } else { // SHORT
-                    if ("SELL".equals(side)) {
-                        isOpening = true;
-                        tradeType = "SHORT";
-                    } else { // BUY
-                        isOpening = false;
-                        tradeType = "SHORT";
-                    }
+            //activeba kerül
+            // S=SELL ez mindig az ellenkezője ha vételköz longoltunk buy volt akkor eladáskor S=SELL lesz.
+            if (status.equals("FILLED")) {
+                if ("MARKET".equals(type)) {
+                    tradeClosedUpdated(
+                            String.format("🚀 New trade opened:\n%s",
+                                    formatTradeDetails(order.o)));
+                } else if ("TRADE".equals(type)) {
+                    // Short záródik
+                    profit += realizedProfit;
+                    updateWinLose(realizedProfit);
+                    tradeClosedUpdated(
+                            String.format("✅ SHORT trade closed:\n%s\nProfit/Loss: %.2f USDT | Total profit: %.2f USDT",
+                                    formatTradeDetails(order.o),
+                                    realizedProfit,
+                                    profit));
                 }
             } else {
-                // One-way mode logic
-                boolean isReducing = realizedProfit != 0.0;
-                if (isReducing) {
-                    if ("BUY".equals(side)) {
-                        isOpening = false;
-                        tradeType = "SHORT"; // closing short
-                    } else {
-                        isOpening = false;
-                        tradeType = "LONG"; // closing long
-                    }
-                } else {
-                    if ("BUY".equals(side)) {
-                        isOpening = true;
-                        tradeType = "LONG";
-                    } else {
-                        isOpening = true;
-                        tradeType = "SHORT";
-                    }
-                }
-            }
-
-            switch (status) {
-                case "FILLED":
-                    all.append(String.format("Order %s filled as %s (%s) -> ", symbol, side, positionSide));
-                    if (isOpening) {
-                        all.append("moved to active.\n");
-                        tradeClosedUpdated(
-                                String.format("🚀 New %s trade opened:\n%s",
-                                        tradeType,
-                                        formatTradeDetails(order.o)));
-                    } else {
-                        profit += realizedProfit;
-                        updateWinLose(realizedProfit);
-
-                        all.append(String.format("closed. Profit: %.4f\n", realizedProfit));
-
-                        tradeClosedUpdated(
-                                String.format("✅ %s Trade closed:\n%s\nProfit/Loss: %.2f USDT | Total profit: %.2f USDT",
-                                        tradeType,
-                                        formatTradeDetails(order.o),
-                                        realizedProfit,
-                                        profit));
-                    }
-                    break;
-
-                default:
-                    log.debug("Unhandled status {} for {}", status, symbol);
+                log.debug("Unhandled status {} for {}", status, symbol);
             }
         }
     }
@@ -180,17 +132,36 @@ public class AccountProfitService {
     private String formatTradeDetails(OrderTradeUpdateDto.Order order) {
         String direction = getDirectionLabel(order.S);
         String symbol = order.s;
-        BigDecimal qty = new BigDecimal(order.q);
-        BigDecimal price = new BigDecimal(order.p);
-        BigDecimal totalUsdt = qty.multiply(price);
+        BigDecimal qty = toBigDecimal(order.q);
+
+        // Nyitásnál entry ár = átlagár (ap), ha nincs, akkor a megadott ár (p)
+        BigDecimal entryPrice = toBigDecimal(order.ap);
+        if (entryPrice.compareTo(BigDecimal.ZERO) == 0) {
+            entryPrice = toBigDecimal(order.p);
+        }
+
+        // Zárásnál (TRADE) → last fill price (L) vagy ap
+        BigDecimal closePrice = toBigDecimal(order.L);
+        if (closePrice.compareTo(BigDecimal.ZERO) == 0) {
+            closePrice = entryPrice;
+        }
+
+        BigDecimal totalUsdt = qty.multiply(entryPrice);
 
         return String.format(
-                "%s | Symbol: %s | Qty: %s (≈ %.2f USDT) | Entry: %s",
+                "%s | Symbol: %s | Qty: %s (≈ %.2f USDT) | Entry: %s | Close: %s",
                 direction,
                 symbol,
                 qty.stripTrailingZeros().toPlainString(),
                 totalUsdt,
-                price.stripTrailingZeros().toPlainString()
+                entryPrice.stripTrailingZeros().toPlainString(),
+                closePrice.stripTrailingZeros().toPlainString()
         );
+    }
+
+    private BigDecimal toBigDecimal(String value) {
+        return (value != null && !value.isEmpty())
+                ? new BigDecimal(value)
+                : BigDecimal.ZERO;
     }
 }
