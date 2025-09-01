@@ -63,14 +63,14 @@ public class TradeService {
     }
 
     /**
-     * 60 percenként frissül a listenKey
+     * 20 percenként megnézük.
      */
     @Scheduled(fixedRate = 20 * 60 * 1000)
     public void refreshBadTrades() {
         LocalDateTime now = LocalDateTime.now();
 
         BAD_SYMBOL_LIST.removeIf(dto ->
-                Duration.between(dto.getStamp(), now).toMinutes() >= 60);
+                Duration.between(dto.getStamp(), now).toMinutes() >= 40);
 
         log.info("Bad symbol list refreshed, current size: {}", BAD_SYMBOL_LIST.size());
     }

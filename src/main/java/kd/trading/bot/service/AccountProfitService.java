@@ -35,8 +35,6 @@ public class AccountProfitService {
         all = new StringBuilder();
 
         if (dto instanceof OrderTradeUpdateDto order) {
-            log.warn("{}", dto);
-
             String status = order.o.X;   // Order státusz (FILLED, NEW, stb.)
             String execType = order.o.x; // Execution type (TRADE, NEW, EXPIRED, stb.)
             String type = order.o.o;     // Order típus (MARKET, LIMIT)
@@ -55,7 +53,7 @@ public class AccountProfitService {
                                     .stamp(LocalDateTime.now())
                                     .build());
                         }
-                        
+
                         profit += realizedProfit;
                         updateWinLose(realizedProfit);
 
@@ -68,7 +66,7 @@ public class AccountProfitService {
                     } else {
                         // New position
                         tradeClosedUpdated(
-                                String.format("🚀 New LONG trade opened:\n%s",
+                                String.format("🚀 New trade opened:\n%s",
                                         formatTradeDetails(order.o)));
 
                         OrderTradeUpdateDto.Order binanceOrder = order.o;
