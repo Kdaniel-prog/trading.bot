@@ -85,7 +85,7 @@ public class TradeService {
         }
 
         if (checkIfContainsSymbol(info.getSymbol()) ) {
-            log.info("Symbol {} is in activeTrades, skipping", info.getSymbol());
+            log.info("Symbol {} is in activeTrades or OpenTrades, skipping", info.getSymbol());
             return;
         }
 
@@ -123,9 +123,8 @@ public class TradeService {
     }
 
     private Boolean checkIfContainsSymbol(String symbol) {
-        return orderDtoList.stream()
-                .map(OrderDto::getSymbol)
-                .anyMatch(symbol::equals);
+        return orderDtoList.stream() .map(OrderDto::getSymbol).anyMatch(symbol::equals)
+                || activeOrderList.stream().map(OrderDto::getSymbol).anyMatch(symbol::equals);
     }
 
     public void moveOrderToActive(OrderDto dto) {
