@@ -91,7 +91,11 @@ public class TradeCheckingService {
                     });
         }
 
-        lastResults = results; // elmentjük a legfrissebb állapotot
+        // frissítjük vagy hozzáadjuk az új eredményeket
+        results.forEach(lastResults::put);
+
+        // eltávolítjuk a lezárt order-eket
+        lastResults.keySet().removeIf(order -> !activeOrders.contains(order));
     }
     /**
      * Kiszámolja a PnL értékeket egy aktív order alapján.

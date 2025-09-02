@@ -63,14 +63,14 @@ public class TradeService {
     }
 
     /**
-     * 20 percenként megnézük.
+     * 30 percenként megnézük.
      */
-    @Scheduled(fixedRate = 20 * 60 * 1000)
+    @Scheduled(fixedRate = 30 * 60 * 1000)
     public void refreshBadTrades() {
         LocalDateTime now = LocalDateTime.now();
 
         BAD_SYMBOL_LIST.removeIf(dto ->
-                Duration.between(dto.getStamp(), now).toMinutes() >= 40);
+                Duration.between(dto.getStamp(), now).toHours() >= 2);
 
         log.info("Bad symbol list refreshed, current size: {}", BAD_SYMBOL_LIST.size());
     }
