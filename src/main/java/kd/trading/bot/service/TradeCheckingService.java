@@ -77,7 +77,7 @@ public class TradeCheckingService {
                             if (openDuration.toMinutes() >= 5) {
                                 BigDecimal absPercent = pnl.getPnlPercent().abs();
 
-                                if (absPercent.compareTo(BigDecimal.valueOf(1.5)) < 0) {
+                                if (absPercent.compareTo(BigDecimal.valueOf(1.0)) < 0) {
                                     BAD_SYMBOL_LIST.add(BadSymbolsDto.builder()
                                                     .symbol(order.getSymbol())
                                                     .stamp(LocalDateTime.now())
