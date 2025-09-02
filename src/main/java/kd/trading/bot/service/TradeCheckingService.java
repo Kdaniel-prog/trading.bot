@@ -74,7 +74,7 @@ public class TradeCheckingService {
                         if (order.getStarted() != null) {
                             Duration openDuration = Duration.between(order.getStarted(), LocalDateTime.now());
 
-                            if (openDuration.toMinutes() >= 5) {
+                            if (openDuration.toMinutes() >= 40) {
                                 BigDecimal absPercent = pnl.getPnlPercent().abs();
 
                                 if (absPercent.compareTo(BigDecimal.valueOf(1.0)) < 0) {
@@ -97,10 +97,12 @@ public class TradeCheckingService {
     private void updateLastResult(Map<OrderDto, PnlResult> results) {
         if(!lastResults.isEmpty()) {
             // frissítjük vagy hozzáadjuk az új eredményeket
-            results.forEach(lastResults::put);
+            lastResults.putAll(results);
 
             // eltávolítjuk a lezárt order-eket
             lastResults.keySet().removeIf(order -> !TradeService.getActiveOrderList().contains(order));
+        } else {
+            lastResults = results;
         }
     }
     /**

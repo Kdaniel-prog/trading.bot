@@ -95,7 +95,7 @@ public class TradeService {
     }
 
     private void makeTrade(Signal signal, BigDecimal lastPrice, SymbolInfo info) {
-        if (orderDtoList.size() >= tradingConfig.maxTrade()) {
+        if (getListSize() >= tradingConfig.maxTrade()) {
             log.info("Max trades reached, skipping {}", info.getSymbol());
             return;
         }
@@ -159,19 +159,26 @@ public class TradeService {
 
     public void closeOrder(OrderDto order) {
         try {
-            BigDecimal qty = order.getExecutedQty().signum() > 0
-                    ? order.getExecutedQty()
-                    : order.getOrigQty();
+            SymbolInfo info = helper.getSymbolInfo(order.getSymbol());
 
-            SymbolInfo info = helper.getSymbolInfo(order.getSymbol()); // pl. cache-ből, ha van
-            Signal signal = order.getSide() == OrderSide.BUY ? Signal.LONG : Signal.SHORT;
+            // 1. Lekérdezzük a tényleges pozíció méretet Binance-től
+            BigDecimal positionAmt = restClient.getOpenPositionQty(info.getSymbol());
+            if (positionAmt.signum() == 0) {
+                log.info("No open position on {}, nothing to close.", info.getSymbol());
+                activeOrderList.remove(order);
+                return;
+            }
 
-            boolean ok = restClient.closeMarketOrder(info, qty, signal);
+            // 2. Signal irány eldöntése a pozíció alapján
+            Signal signal = positionAmt.signum() > 0 ? Signal.LONG : Signal.SHORT;
+
+            // 3. Pozíció zárása
+            boolean ok = restClient.closeMarketOrder(info, positionAmt.abs(), signal);
             if (ok) {
                 log.info("Closed order {} on {}", order.getOrderId(), order.getSymbol());
                 activeOrderList.remove(order);
             } else {
-                log.warn("Failed to close order {} on {}", order.getOrderId(), order.getSymbol());
+                log.warn("Failed to close position on {}", order.getSymbol());
             }
         } catch (Exception e) {
             log.error("Exception while closing order {}", order.getSymbol(), e);

@@ -236,6 +236,31 @@ public class BinanceRestClient {
         }
     }
 
+    public BigDecimal getOpenPositionQty(String symbol) {
+        try {
+            long ts = System.currentTimeMillis();
+            String query = "symbol=" + symbol + "&timestamp=" + ts;
+            String signature = util.sign(query);
+
+            String url = config.restBaseUrl() + "/fapi/v2/positionRisk?" + query + "&signature=" + signature;
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("X-MBX-APIKEY", config.apiKey())
+                    .GET()
+                    .build();
+
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            JsonNode json = new ObjectMapper().readTree(response.body());
+            if (json.isArray() && json.size() > 0) {
+                return new BigDecimal(json.get(0).get("positionAmt").asText());
+            }
+        } catch (Exception e) {
+            log.error("Error fetching position for {}", symbol, e);
+        }
+        return BigDecimal.ZERO;
+    }
 
     private String buildQueryString(Map<String, String> params) {
         return params.entrySet().stream()
