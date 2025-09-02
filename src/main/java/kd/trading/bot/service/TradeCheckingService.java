@@ -91,11 +91,17 @@ public class TradeCheckingService {
                     });
         }
 
-        // frissítjük vagy hozzáadjuk az új eredményeket
-        results.forEach(lastResults::put);
+        updateLastResult(results);
+    }
 
-        // eltávolítjuk a lezárt order-eket
-        lastResults.keySet().removeIf(order -> !activeOrders.contains(order));
+    private void updateLastResult(Map<OrderDto, PnlResult> results) {
+        if(!lastResults.isEmpty()) {
+            // frissítjük vagy hozzáadjuk az új eredményeket
+            results.forEach(lastResults::put);
+
+            // eltávolítjuk a lezárt order-eket
+            lastResults.keySet().removeIf(order -> !TradeService.getActiveOrderList().contains(order));
+        }
     }
     /**
      * Kiszámolja a PnL értékeket egy aktív order alapján.

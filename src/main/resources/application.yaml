@@ -10,17 +10,17 @@ binance:
   secretKey: aa5dc12959b2c0205a07f50618fdbe56b7021a68ffe958623338290851138128
 
 trading:
-  stopLimit: -10.0
-  winLimit: 20.0
+  stopLimit: -5.0
+  winLimit: 10.0
   moneyUsdt: 50
-  maxTrade: 2
+  maxTrade: 5
   coinMinMonth: 4
   coinType: USDT
   leverage: 20 #ez binancen x20 van nekem alapből.
 
 telegram:
   username: zzpastabot
-  token: 8488123185:AAFBC7asn-iVC_pMs_8-l9hboc9n3BlCYpg
+  token: 8488123185:AAG35TomoRAcpfZknzei_EmUjR1zlcHlfOY
   chat-ids:
     - 7809477965
 

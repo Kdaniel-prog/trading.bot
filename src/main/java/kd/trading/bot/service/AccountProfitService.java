@@ -35,6 +35,7 @@ public class AccountProfitService {
         all = new StringBuilder();
 
         if (dto instanceof OrderTradeUpdateDto order) {
+            log.warn("{}", dto);
             String status = order.o.X;   // Order státusz (FILLED, NEW, stb.)
             String execType = order.o.x; // Execution type (TRADE, NEW, EXPIRED, stb.)
             String type = order.o.o;     // Order típus (MARKET, LIMIT)
