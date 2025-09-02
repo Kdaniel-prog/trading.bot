@@ -132,6 +132,10 @@ public class TradeService {
         }, 2, TimeUnit.MINUTES);
     }
 
+    public Integer getListSize() {
+        return activeOrderList.size() + orderDtoList.size();
+    }
+
     public void moveOrderToActive(OrderDto orderDto) {
         orderDto.setStarted(LocalDateTime.now());
         activeOrderList.add(orderDto);

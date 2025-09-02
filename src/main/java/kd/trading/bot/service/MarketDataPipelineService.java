@@ -43,8 +43,7 @@ public class MarketDataPipelineService {
     public void processMessage(String message, Set<SymbolInfo> tradableSymbols) {
         try {
             //0. lépés nézzük meg hogy van e már 5 active tradünk
-            if(TradeService.getActiveOrderList().size() >= tradingConfig.maxTrade() ||
-                    TradeService.getOrderDtoList().size() >= tradingConfig.maxTrade()) return;
+            if(tradeService.getListSize() >= tradingConfig.maxTrade()) return;
 
             // 1. parse
             List<BinanceTickerData> tickers = parser.parseMarketMessage(message);
@@ -83,7 +82,7 @@ public class MarketDataPipelineService {
     public void runTradingCycle(Set<SymbolInfo> tradableSymbols) {
         if (latestResult == null) return;
 
-        int freeSlots = tradingConfig.maxTrade() - TradeService.getActiveOrderList().size();
+        int freeSlots = tradingConfig.maxTrade() - tradeService.getListSize();
         if (freeSlots <= 0) return;
 
         int topLimit = (int) Math.ceil(freeSlots / 2.0);   // felső lista kapja a kerekítést
