@@ -63,6 +63,15 @@ public class TradingTelegramBot extends TelegramLongPollingBot implements Applic
     }
 
     private void handleCommand(String chatId, String command) {
+        if (!config.chatIds().contains(chatId)) {
+            // Nem engedélyezett felhasználó
+            sendChatId(chatId,
+                    "Your chat ID: " + chatId + "\n" +
+                            "❌ You are not authorized to use this bot.\n" +
+                            "ℹ️ Please ask the admin to add you.");
+            return;
+        }
+
         switch (command.toLowerCase()) {
             case "/start":
                 sendChatId(chatId, "Hi! 👋 Here is the quick buttons:");
