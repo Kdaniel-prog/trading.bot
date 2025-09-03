@@ -55,7 +55,6 @@ public class BinanceMarketWebSocketClient extends WebSocketClient {
         if(now - lastProcessed >= INTERVAL_MS){
             lastProcessed = now;
             listener.onChangeData(message);
-            log.info("WS Market check active trades");
         }
 
         // Use Algo to rate coins
