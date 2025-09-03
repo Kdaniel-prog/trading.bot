@@ -63,8 +63,11 @@ public class MarketDataPipelineService {
                     .toList();
             if (analyzed.isEmpty()) return;
 
+            List<CoinAnalysis> analyses = analyzed.stream()
+                    .filter(c -> c.getSymbol().isBlank()).toList();
+
             // 5. ranking
-            latestResult = rankingService.rank(analyzed);
+            latestResult = rankingService.rank(analyses);
             log.info("Coins Rated!");
 
             //6. trade

@@ -62,7 +62,8 @@ public class TradeCheckingService {
                         PnlResult pnl = calculatePnl(order, currentPrice);
 
                         results.put(order, pnl);
-
+                        log.warn("debug1: pnlPercent: {}| config:{} | symbol: {}",pnl.getPnlPercent(), tradingConfig.stopLimit(), order.getSymbol());
+                        log.warn("debug2: pnlPercent: {}",pnl.getPnlPercent().compareTo(BigDecimal.valueOf(tradingConfig.stopLimit())));
                         // STOP/WIN check (pnlPercent alapján)
                         if (pnl.getPnlPercent().compareTo(BigDecimal.valueOf(tradingConfig.stopLimit())) <= 0) {
                             log.info("STOP triggered on {} at {}% -> closing trade", order.getSymbol(), pnl.getPnlPercent());
@@ -74,7 +75,7 @@ public class TradeCheckingService {
                         if (order.getStarted() != null) {
                             Duration openDuration = Duration.between(order.getStarted(), LocalDateTime.now());
 
-                            if (openDuration.toMinutes() >= 40) {
+                            if (openDuration.toMinutes() >= 100) {
                                 BigDecimal absPercent = pnl.getPnlPercent().abs();
 
                                 if (absPercent.compareTo(BigDecimal.valueOf(1.0)) < 0) {

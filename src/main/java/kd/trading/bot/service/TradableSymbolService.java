@@ -29,6 +29,7 @@ public class TradableSymbolService {
 
     public Set<SymbolInfo> getTradableSymbols() {
         return restClient.getBinanceTradableSymbols().stream()
+                .filter( s-> s.getSymbol().isBlank())
                 .filter(s -> "TRADING".equalsIgnoreCase(s.getStatus()))
                 .filter(s -> {
                     if (s.getOnboardDate() == null) return false;

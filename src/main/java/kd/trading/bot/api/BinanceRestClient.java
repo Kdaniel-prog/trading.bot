@@ -200,7 +200,7 @@ public class BinanceRestClient {
         }
     }
 
-    public boolean closeMarketOrder(SymbolInfo info, BigDecimal qty, Signal signal) {
+    public void closeMarketOrder(SymbolInfo info, BigDecimal qty, Signal signal) {
         try {
             int qtyScale = info.getQuantityScaleOrDefault();
             BigDecimal normalizedQty = qty.setScale(qtyScale, RoundingMode.DOWN);
@@ -227,12 +227,10 @@ public class BinanceRestClient {
                     .POST(HttpRequest.BodyPublishers.noBody())
                     .build();
 
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            client.send(request, HttpResponse.BodyHandlers.ofString());
 
-            return response.body().contains("orderId");
         } catch (Exception e) {
             log.error("Error closing market order for {}", info.getSymbol(), e);
-            return false;
         }
     }
 

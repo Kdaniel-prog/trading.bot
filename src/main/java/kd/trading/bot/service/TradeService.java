@@ -139,7 +139,7 @@ public class TradeService {
     public void moveOrderToActive(OrderDto orderDto) {
         orderDto.setStarted(LocalDateTime.now());
         activeOrderList.add(orderDto);
-        orderDtoList.removeIf(o -> o.getOrderId().equals(orderDto.getOrderId()));
+        orderDtoList.removeIf(o -> o.getOrderId() != null && o.getOrderId().equals(orderDto.getOrderId()));
         log.info("Order {} moved to active trades.", orderDto.getSymbol());
     }
 
@@ -173,13 +173,7 @@ public class TradeService {
             Signal signal = positionAmt.signum() > 0 ? Signal.LONG : Signal.SHORT;
 
             // 3. Pozíció zárása
-            boolean ok = restClient.closeMarketOrder(info, positionAmt.abs(), signal);
-            if (ok) {
-                log.info("Closed order {} on {}", order.getOrderId(), order.getSymbol());
-                activeOrderList.remove(order);
-            } else {
-                log.warn("Failed to close position on {}", order.getSymbol());
-            }
+            restClient.closeMarketOrder(info, positionAmt.abs(), signal);
         } catch (Exception e) {
             log.error("Exception while closing order {}", order.getSymbol(), e);
         }
