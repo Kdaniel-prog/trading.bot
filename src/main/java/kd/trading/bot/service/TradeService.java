@@ -95,7 +95,8 @@ public class TradeService {
     }
 
     private void makeTrade(Signal signal, BigDecimal lastPrice, SymbolInfo info) {
-        if (getListSize() >= tradingConfig.maxTrade()) {
+        log.warn("list size: {} | max trade : {}", getListSize(), tradingConfig.maxTrade());
+        if (getListSize() > tradingConfig.maxTrade()) {
             log.info("Max trades reached, skipping {}", info.getSymbol());
             return;
         }

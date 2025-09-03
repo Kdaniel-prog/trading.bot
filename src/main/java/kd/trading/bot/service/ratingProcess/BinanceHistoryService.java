@@ -16,13 +16,13 @@ public class BinanceHistoryService {
 
     public double getATH(String symbol) {
         List<List<Object>> klines = restClient.getKlines(symbol, "1d", 1000);
-        if (klines.isEmpty()) return 0.0;
+        if (klines.isEmpty()) {
+            throw new IllegalStateException("No klines data for symbol: " + symbol);
+        }
 
-        double ath = klines.stream()
+        return klines.stream()
                 .mapToDouble(k -> Double.parseDouble(k.get(2).toString())) // index 2 = high
                 .max()
-                .orElse(0.0);
-
-        return ath;
+                .orElseThrow(() -> new IllegalStateException("No high values for: " + symbol));
     }
 }
