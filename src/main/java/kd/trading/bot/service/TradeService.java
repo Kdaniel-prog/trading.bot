@@ -45,12 +45,12 @@ public class TradeService {
 
     // --- queue + worker thread ---
     private final BlockingQueue<Runnable> tradeQueue = new LinkedBlockingQueue<>();
-    private final ExecutorService workerPool  = Executors.newFixedThreadPool(4);
+    private final ExecutorService workerPool  = Executors.newFixedThreadPool(1);
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
 
     @PostConstruct
     public void initWorker() {
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 1; i++) {
             workerPool.submit(this::processTrades);
         }
     }
