@@ -68,7 +68,7 @@ public class MarketDataPipelineService {
             log.info("check tradeservice 4");
 
             List<CoinAnalysis> analyses = analyzed.stream()
-                    .filter(c -> c.getSymbol().isBlank()).toList();
+                    .filter(c -> !c.getSymbol().isBlank()).toList();
 
             // 5. ranking
             latestResult = rankingService.rank(analyses);

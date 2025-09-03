@@ -15,7 +15,7 @@ trading:
   moneyUsdt: 50
   maxTrade: 5
   coinMinMonth: 4
-  coinType: USDC
+  coinType: USDT
   leverage: 20 #ez binancen x20 van nekem alapből.
 
 telegram:

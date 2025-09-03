@@ -1,21 +1,29 @@
 package kd.trading.bot.service.ratingProcess;
 
+import kd.trading.bot.config.trading.TradingConfig;
 import kd.trading.bot.model.BadSymbolsDto;
 import kd.trading.bot.model.BinanceTickerData;
 import kd.trading.bot.model.SymbolInfo;
 import kd.trading.bot.service.TradeService;
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
+import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @Slf4j
+@FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
+@RequiredArgsConstructor
 public class TickerPrefilterService {
 
-    private static final int MAX_CANDIDATES = 60;
+    static int MAX_CANDIDATES = 60;
+    TradingConfig config;
 
     /**
      * Előszűrés: csak a tradable szimbólumok, nincs a bad listában,
@@ -28,11 +36,10 @@ public class TickerPrefilterService {
 
         return tickers.stream()
                 // csak engedélyezett symbol
-                .filter(ticker -> tradableSymbols.stream()
-                        .anyMatch(s -> s.getSymbol().equals(ticker.getSymbol())))
+                .filter(ticker -> ticker.getSymbol().endsWith(config.coinType()))
                 // ne legyen benne a bad listában
                 .filter(ticker -> !TradeService.BAD_SYMBOL_LIST.contains(new BadSymbolsDto(ticker.getSymbol() )))
-                // szűrés, hogy tényleg legyen forgalom (pl. min. 1M USDT forgalom)
+                // szűrés, hogy tényleg legyen forgalom (pl. min. 3M USDT forgalom)
                 .filter(ticker -> ticker.getQuoteVolume() > 3_000_000)
                 // szűrés, hogy mozogjon is (pl. abszolút árkülönbség > 0.5%)
                 .filter(ticker -> Math.abs(ticker.getPriceChangePercent()) > 0.5)
