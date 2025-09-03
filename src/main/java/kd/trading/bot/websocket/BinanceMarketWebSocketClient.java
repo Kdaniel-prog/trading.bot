@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.java_websocket.client.WebSocketClient;
 import org.java_websocket.framing.PingFrame;
 import org.java_websocket.handshake.ServerHandshake;
+import org.springframework.scheduling.annotation.Scheduled;
 
 import java.net.URI;
 import java.util.concurrent.Executors;
@@ -32,29 +33,17 @@ public class BinanceMarketWebSocketClient extends WebSocketClient {
         this.listener = listener;
     }
 
-    public void sendPingFrame() {
+    @Scheduled(fixedRate = 1 * 60 * 1000) // 15 percenként
+    public void keepAlive() {
         if (this.isOpen()) {
-            try {
-                this.sendFrame(new PingFrame());
-                log.debug("Ping frame sent");
-            } catch (Exception e) {
-                log.warn("Ping failed", e);
-            }
+            this.sendPing();
+            log.debug("Sent PING to Binance WS");
         }
     }
 
     @Override
     public void onOpen(ServerHandshake handshakeData) {
         log.info("Connected to Binance Futures Market WebSocket");
-
-        // start ping/pong to keep alive
-        scheduler.scheduleAtFixedRate(() -> {
-            try {
-                if (this.isOpen()) this.sendPingFrame();
-            } catch (Exception e) {
-                log.warn("Failed to send ping", e);
-            }
-        }, PING_INTERVAL_MS, PING_INTERVAL_MS, TimeUnit.MILLISECONDS);
     }
 
     @Override
@@ -73,6 +62,8 @@ public class BinanceMarketWebSocketClient extends WebSocketClient {
             log.debug(message);
             lastProcessed2 = now;
             listener.onMarketData(message);
+            log.info("WS Market algo");
+
         }
 
     }

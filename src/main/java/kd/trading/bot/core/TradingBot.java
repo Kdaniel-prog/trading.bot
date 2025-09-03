@@ -34,7 +34,7 @@ public class TradingBot implements MarketDataListener, AccountDataListener {
     @PostConstruct
     private void init() throws URISyntaxException {
         //1. start Binance market ws
-        String wsUrlMain = "wss://fstream.binance.com/ws/!ticker@arr";
+        String wsUrlMain = "wss://fstream.binance.com/stream?streams=!ticker@arr";
         BinanceMarketWebSocketClient client = new BinanceMarketWebSocketClient(new URI(wsUrlMain), this);
         client.connect();
 

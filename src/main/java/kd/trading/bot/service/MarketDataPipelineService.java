@@ -44,24 +44,28 @@ public class MarketDataPipelineService {
         try {
             //0. lépés nézzük meg hogy van e már 5 active tradünk
             if(tradeService.getListSize() >= tradingConfig.maxTrade()) return;
-
+            log.info("check tradeservice 0");
             // 1. parse
             List<BinanceTickerData> tickers = parser.parseMarketMessage(message);
             if (tickers.isEmpty()) return;
+            log.info("check tradeservice 1");
 
             // 2. prefilter
             List<BinanceTickerData> prefiltered = prefilterService.prefilter(tickers, tradableSymbols);
             if (prefiltered.isEmpty()) return;
+            log.info("check tradeservice 2");
 
             // 3. ath filter
             List<BinanceTickerData> athFiltered = athFilterService.filterBelowAth(prefiltered);
             if (athFiltered.isEmpty()) return;
+            log.info("check tradeservice 3");
 
             // 4. analysis
             List<CoinAnalysis> analyzed = athFiltered.stream()
                     .map(ticker -> algorithmService.analyzeSwingCoin(ticker.getSymbol(), ticker.getLastPrice()) )
                     .toList();
             if (analyzed.isEmpty()) return;
+            log.info("check tradeservice 4");
 
             List<CoinAnalysis> analyses = analyzed.stream()
                     .filter(c -> c.getSymbol().isBlank()).toList();

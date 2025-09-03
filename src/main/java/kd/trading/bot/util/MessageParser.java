@@ -2,6 +2,7 @@ package kd.trading.bot.util;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import kd.trading.bot.model.BinanceStreamWrapper;
 import kd.trading.bot.model.BinanceTickerData;
 import kd.trading.bot.model.OrderDto;
 import lombok.extern.slf4j.Slf4j;
@@ -20,11 +21,12 @@ public class MessageParser {
      */
     public List<BinanceTickerData> parseMarketMessage(String message) {
         try {
-            ObjectMapper MAPPER = new ObjectMapper();
-            return MAPPER.readValue(
-                    message,
-                    new TypeReference<List<BinanceTickerData>>() {}
-            );
+            ObjectMapper objectMapper = new ObjectMapper();
+            BinanceStreamWrapper<List<BinanceTickerData>> wrapper =
+                    objectMapper.readValue(message, new TypeReference<BinanceStreamWrapper<List<BinanceTickerData>>>() {});
+
+            return wrapper.getData();
+
         } catch (Exception e) {
             log.error("Failed to parse market data message", e);
             return List.of(); // üres lista, hogy a pipeline ne törjön el

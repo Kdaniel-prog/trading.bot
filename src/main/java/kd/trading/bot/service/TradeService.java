@@ -116,6 +116,7 @@ public class TradeService {
         );
 
         if(orderDto != null) orderDtoList.add(orderDto);
+        log.info("Open trade sent");
 
         // ha 1 perc múlva sincs update, akkor töröljük
         scheduler.schedule(() -> {
