@@ -59,7 +59,7 @@ public class AccountProfitService {
                         updateWinLose(realizedProfit);
 
                         tradeClosedUpdated(
-                                String.format("✅ Trade closed:\n%s\nProfit/Loss: %.2f USDT | Total profit: %.2f USDT",
+                                String.format("✅ Trade closed:\n%s\nProfit/Loss: %.2f USDC | Total profit: %.2f USDC",
                                         formatTradeDetails(order.o),
                                         realizedProfit,
                                         profit));
@@ -121,7 +121,7 @@ public class AccountProfitService {
 
         double winRate = totalTrades > 0 ? (winTrades * 100.0 / totalTrades) : 0.0;
         stats.append(String.format("Win rate: %.2f%%\n", winRate));
-        stats.append(String.format("Accumulated profit: %.4f USDT\n", profit));
+        stats.append(String.format("Accumulated profit: %.4f USDC\n", profit));
         return stats.toString();
     }
 
@@ -160,14 +160,14 @@ public class AccountProfitService {
             closePrice = entryPrice;
         }
 
-        BigDecimal totalUsdt = qty.multiply(entryPrice);
+        BigDecimal totalUsdc = qty.multiply(entryPrice);
 
         return String.format(
-                "%s | Symbol: %s | Qty: %s (≈ %.2f USDT) | Entry: %s | Close: %s",
+                "%s | Symbol: %s | Qty: %s (≈ %.2f USDC) | Entry: %s | Close: %s",
                 direction,
                 symbol,
                 qty.stripTrailingZeros().toPlainString(),
-                totalUsdt,
+                totalUsdc,
                 entryPrice.stripTrailingZeros().toPlainString(),
                 closePrice.stripTrailingZeros().toPlainString()
         );

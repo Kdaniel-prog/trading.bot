@@ -15,12 +15,12 @@ trading:
   moneyUsdt: 50
   maxTrade: 5
   coinMinMonth: 4
-  coinType: USDT
+  coinType: USDC
   leverage: 20 #ez binancen x20 van nekem alapből.
 
 telegram:
   username: zzpastabot
-  token: 8488123185:AAGnhOnFeFH9_neo33q8r3xXmUzFyNnpw1g
+  token: 8488123185:AAFOj53Uq_vOT2tI4rwblLcjD02wqhiuSBU
   chat-ids:
     - 7809477965
 
