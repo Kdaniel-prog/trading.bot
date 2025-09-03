@@ -48,7 +48,6 @@ public class BinanceMarketWebSocketClient extends WebSocketClient {
 
     @Override
     public void onMessage(String message) {
-        log.info("Raw message received WS Market"); // railwayen is látni fogod
         if(TelegramCommandService.SLEEP_MODE) return;
         long now = System.currentTimeMillis();
 
@@ -56,6 +55,7 @@ public class BinanceMarketWebSocketClient extends WebSocketClient {
         if(now - lastProcessed >= INTERVAL_MS){
             lastProcessed = now;
             listener.onChangeData(message);
+            log.info("WS Market check active trades");
         }
 
         // Use Algo to rate coins
@@ -63,6 +63,8 @@ public class BinanceMarketWebSocketClient extends WebSocketClient {
             log.debug(message);
             lastProcessed2 = now;
             listener.onMarketData(message);
+            log.info("WS Market algo");
+
         }
 
     }
