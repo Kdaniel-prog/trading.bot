@@ -59,6 +59,7 @@ public class BinanceMarketWebSocketClient extends WebSocketClient {
 
     @Override
     public void onMessage(String message) {
+        log.info("RAW WS MESSAGE: {}", message); // railwayen is látni fogod
         if(TelegramCommandService.SLEEP_MODE) return;
         long now = System.currentTimeMillis();
 
