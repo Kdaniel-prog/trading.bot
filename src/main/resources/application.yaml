@@ -4,16 +4,25 @@ spring:
 
 binance:
   restBaseUrl: https://testnet.binancefuture.com
-  wsBaseUrl: wss://stream.binancefuture.com/ws
+  wsBaseUrl: wss://stream.binancefuture.com/wsű
 
   apiKey: 2c8b1824f71f95dc77259ae2d81de508f8e133976a6948c89ea81bff665f589d
   secretKey: aa5dc12959b2c0205a07f50618fdbe56b7021a68ffe958623338290851138128
 
+trading:
+  stopLimit: -0.76
+  winLimit: 1.54
+  moneyUsdt: 50
+  maxTrade: 5
+  coinMinMonth: 4
+  coinType: USDT
+  leverage: 20 #ez binancen x20 van nekem alapből.
 
-swing-trading:
-  stopLimit: 0.25
-  winLimit: 0.45
-  tradeWithPercent: 0.2
+telegram:
+  username: zzpastabot
+  token: 8488123185:AAG35TomoRAcpfZknzei_EmUjR1zlcHlfOY
+  chat-ids:
+    - 7809477965
 
 realBinance:
   restBaseUrl: https://fapi.binance.com

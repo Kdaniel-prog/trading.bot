@@ -1,4 +1,4 @@
-package kd.trading.bot.config.binance;
+package kd.trading.bot.config;
 
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.context.annotation.Bean;
@@ -8,7 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.http.HttpClient;
 
 @Configuration
-public class BinanceConfigBeans {
+public class TradingBotConfigBeans {
 
     @Bean
     public HttpClient httpClient() {

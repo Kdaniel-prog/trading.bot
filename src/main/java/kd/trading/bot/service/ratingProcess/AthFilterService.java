@@ -1,4 +1,4 @@
-package kd.trading.bot.service;
+package kd.trading.bot.service.ratingProcess;
 
 import kd.trading.bot.model.BinanceTickerData;
 import lombok.RequiredArgsConstructor;

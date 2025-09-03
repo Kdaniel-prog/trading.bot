@@ -1,5 +1,6 @@
 package kd.trading.bot.session;
 
+import jakarta.annotation.PostConstruct;
 import kd.trading.bot.api.BinanceRestClient;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -8,8 +9,6 @@ import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-
-import jakarta.annotation.PostConstruct;
 
 @Slf4j
 @Component

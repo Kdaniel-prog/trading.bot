@@ -1,6 +1,17 @@
 package kd.trading.bot.service;
 
+import kd.trading.bot.config.trading.TradingConfig;
+import kd.trading.bot.enums.OrderSide;
+import kd.trading.bot.enums.Signal;
 import kd.trading.bot.model.BinanceTickerData;
+import kd.trading.bot.model.CoinAnalysis;
+import kd.trading.bot.model.OrderDto;
+import kd.trading.bot.model.SymbolInfo;
+import kd.trading.bot.service.ratingProcess.AlgorithmService;
+import kd.trading.bot.service.ratingProcess.AthFilterService;
+import kd.trading.bot.service.ratingProcess.RankingService;
+import kd.trading.bot.service.ratingProcess.TickerPrefilterService;
+import kd.trading.bot.util.MessageParser;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -8,6 +19,8 @@ import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.List;
 import java.util.Set;
 
@@ -16,19 +29,24 @@ import java.util.Set;
 @Slf4j
 @FieldDefaults(level = AccessLevel.PRIVATE)
 public class MarketDataPipelineService {
-    final MarketDataParserService parserService;
+    final MessageParser parser;
     final TickerPrefilterService prefilterService;
     final AthFilterService athFilterService;
-    final CoinAnalysisService analysisService;
     final RankingService rankingService;
+    final AlgorithmService algorithmService;
+    final TradingConfig tradingConfig;
+    final TradeService tradeService;
 
     @Getter
     volatile RankingService.RankedCoins latestResult = new RankingService.RankedCoins(List.of(), List.of());
 
-    public void processMessage(String message, Set<String> tradableSymbols) {
+    public void processMessage(String message, Set<SymbolInfo> tradableSymbols) {
         try {
+            //0. lépés nézzük meg hogy van e már 5 active tradünk
+            if(tradeService.getListSize() >= tradingConfig.maxTrade()) return;
+
             // 1. parse
-            List<BinanceTickerData> tickers = parserService.parseMessage(message);
+            List<BinanceTickerData> tickers = parser.parseMarketMessage(message);
             if (tickers.isEmpty()) return;
 
             // 2. prefilter
@@ -40,21 +58,62 @@ public class MarketDataPipelineService {
             if (athFiltered.isEmpty()) return;
 
             // 4. analysis
-            List<BinanceTickerData> analyzed = analysisService.analyze(athFiltered);
+            List<CoinAnalysis> analyzed = athFiltered.stream()
+                    .map(ticker -> algorithmService.analyzeSwingCoin(ticker.getSymbol(), ticker.getLastPrice()) )
+                    .toList();
             if (analyzed.isEmpty()) return;
 
+            List<CoinAnalysis> analyses = analyzed.stream()
+                    .filter(c -> c.getSymbol().isBlank()).toList();
+
             // 5. ranking
-            RankingService.RankedCoins ranked = rankingService.rank(analyzed);
-            latestResult = ranked;
+            latestResult = rankingService.rank(analyses);
+            log.info("Coins Rated!");
 
-            log.info("=== TOP 5 ===");
-            ranked.top().forEach(c -> log.info("{} | Score {} | Signal {}", c.getSymbol(), c.getScore(), c.getSignal()));
-            log.info("=== BOTTOM 5 ===");
-            ranked.bottom().forEach(c -> log.info("{} | Score {} | Signal {}", c.getSymbol(), c.getScore(), c.getSignal()));
+            //6. trade
+            runTradingCycle(tradableSymbols);
 
+            //7. log
+            for(OrderDto order: TradeService.getOrderDtoList()) {
+                log.info("**Order list: {}", order.getSymbol());
+            }
         } catch (Exception e) {
             log.error("MarketData pipeline failed", e);
         }
+    }
+
+    public void runTradingCycle(Set<SymbolInfo> tradableSymbols) {
+        if (latestResult == null) return;
+
+        int freeSlots = tradingConfig.maxTrade() - tradeService.getListSize();
+        if (freeSlots <= 0) return;
+
+        int topLimit = (int) Math.ceil(freeSlots / 2.0);   // felső lista kapja a kerekítést
+        int bottomLimit = freeSlots - topLimit;            // maradék megy az alsónak
+
+        latestResult.top().stream()
+            .filter(t -> t.getSignal() != Signal.NO_TRADE)
+            .limit(topLimit)
+            .forEach(t -> {
+                tradableSymbols.stream()
+                    .filter(s -> s.getSymbol().equals(t.getSymbol()))
+                    .findFirst()
+                    .ifPresent(symbol ->
+                            tradeService.openTrade(t.getSignal(), BigDecimal.valueOf(t.getLastPrice()), symbol)
+                    );
+            });
+
+        latestResult.bottom().stream()
+            .filter(t -> t.getSignal() != Signal.NO_TRADE)
+            .limit(bottomLimit)
+            .forEach(t -> {
+                tradableSymbols.stream()
+                    .filter(s -> s.getSymbol().equals(t.getSymbol()))
+                    .findFirst()
+                    .ifPresent(symbol ->
+                        tradeService.openTrade(t.getSignal(), BigDecimal.valueOf(t.getLastPrice()), symbol)
+                    );
+            });
     }
 
 }

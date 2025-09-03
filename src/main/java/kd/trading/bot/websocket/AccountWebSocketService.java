@@ -1,6 +1,6 @@
 package kd.trading.bot.websocket;
 
-import kd.trading.bot.interfaces.MarketDataListener;
+import kd.trading.bot.interfaces.AccountDataListener;
 import kd.trading.bot.service.TelegramCommandService;
 import lombok.AccessLevel;
 import lombok.experimental.FieldDefaults;
@@ -16,20 +16,17 @@ import java.util.concurrent.TimeUnit;
 
 @FieldDefaults(level = AccessLevel.PRIVATE)
 @Slf4j
-public class BinanceMarketWebSocketClient extends WebSocketClient {
-
-    static final long INTERVAL_MS = 15_000; // 25 sec
-    static final long INTERVAL_MS2 = 180_000; // 5 minutes
+public class AccountWebSocketService extends WebSocketClient  {
+    static final long INTERVAL_MS = 180_000; // 3 minutes
     static final long PING_INTERVAL_MS = 30_000; // 30 sec ping
 
-    final MarketDataListener listener;
-    volatile long lastProcessed = 0;
-    volatile long lastProcessed2 = 0;
     final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
 
-    public BinanceMarketWebSocketClient(URI serverUri, MarketDataListener listener) {
-        super(serverUri);
-        this.listener = listener;
+    final AccountDataListener accountDataListener;
+
+    public AccountWebSocketService(String serverUri, AccountDataListener accountDataListener) {
+        super(URI.create(serverUri));
+        this.accountDataListener = accountDataListener;
     }
 
     public void sendPingFrame() {
@@ -45,7 +42,7 @@ public class BinanceMarketWebSocketClient extends WebSocketClient {
 
     @Override
     public void onOpen(ServerHandshake handshakeData) {
-        log.info("Connected to Binance Futures Market WebSocket");
+        log.info("Connected Account Data WebSocket");
 
         // start ping/pong to keep alive
         scheduler.scheduleAtFixedRate(() -> {
@@ -60,21 +57,7 @@ public class BinanceMarketWebSocketClient extends WebSocketClient {
     @Override
     public void onMessage(String message) {
         if(TelegramCommandService.SLEEP_MODE) return;
-        long now = System.currentTimeMillis();
-
-        //Check active trades
-        if(now - lastProcessed >= INTERVAL_MS){
-            lastProcessed = now;
-            listener.onChangeData(message);
-        }
-
-        // Use Algo to rate coins
-        if (now - lastProcessed2 >= INTERVAL_MS2) {
-            log.debug(message);
-            lastProcessed2 = now;
-            listener.onMarketData(message);
-        }
-
+        this.accountDataListener.onTradeData(message);
     }
 
     @Override
@@ -94,6 +77,4 @@ public class BinanceMarketWebSocketClient extends WebSocketClient {
     public void onError(Exception ex) {
         log.error("Error: ", ex);
     }
-
 }
-
