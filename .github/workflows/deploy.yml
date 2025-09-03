@@ -28,3 +28,6 @@ jobs:
             docker rm springapp_container || true
             docker build -t springapp .
             docker run -d -p 8080:8080 --name springapp_container springapp
+            echo "==== Last 20 log lines from app ===="
+            docker logs --tail 20 springapp_container
+            echo "🚀 Deploy successful!"
