@@ -67,6 +67,7 @@ public class BinanceRestClient {
             Instant cutoff = LocalDateTime.now(ZoneOffset.UTC).minusMonths(tradingConfig.coinMinMonth()).toInstant(ZoneOffset.UTC);
 
             return exchangeInfo.getSymbols().stream()
+                    .filter(s -> s.getSymbol().isBlank())
                     .filter(s -> "TRADING".equals(s.getStatus()))
                     .filter(s -> tradingConfig.coinType().equals(s.getQuoteAsset()))
                     .filter(s -> Instant.ofEpochMilli(s.getOnboardDate()).isBefore(cutoff)) // 4 hónap filter
