@@ -89,7 +89,13 @@ public class BinanceRestClient {
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
         JsonNode node = mapper.readTree(response.body());
-        return node.get("listenKey").asText();
+        JsonNode listenKeyNode = node.get("listenKey");
+
+        if (listenKeyNode == null || listenKeyNode.isNull()) {
+            throw new RuntimeException("Nem található listenKey a válaszban: " + response.body());
+        }
+
+        return listenKeyNode.asText();
     }
 
     public void keepAliveListenKey(String listenKey) throws IOException, InterruptedException {

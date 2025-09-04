@@ -122,14 +122,9 @@ public class TradeService {
         // ha 1 perc múlva sincs update, akkor töröljük
         scheduler.schedule(() -> {
             if (orderDtoList.contains(orderDto)) {
+                assert orderDto != null;
                 log.info("Order {} timed out -> attempting cancel on Binance", orderDto.getSymbol());
-
-                boolean canceled = restClient.cancelOrdersForSymbol(orderDto.getSymbol());
-                if (canceled) {
-                    removeFromOrders(orderDto.getSymbol());
-                } else {
-                    log.warn("Failed to cancel order {} on Binance -> keeping in list", orderDto.getSymbol());
-                }
+                restClient.cancelOrdersForSymbol(orderDto.getSymbol());
             }
         }, 2, TimeUnit.MINUTES);
     }
@@ -143,11 +138,6 @@ public class TradeService {
         activeOrderList.add(orderDto);
         orderDtoList.removeIf(o -> o.getOrderId() != null && o.getOrderId().equals(orderDto.getOrderId()));
         log.info("Order {} moved to active trades.", orderDto.getSymbol());
-    }
-
-    public void removeFromOrders(String symbol) {
-        orderDtoList.removeIf(o -> o.getSymbol().equals(symbol));
-        log.info("Order {} removed from order list.", symbol);
     }
 
     public void removeFromActiveBySymbol(String symbol) {

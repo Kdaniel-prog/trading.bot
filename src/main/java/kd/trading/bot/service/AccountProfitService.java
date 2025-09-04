@@ -42,12 +42,12 @@ public class AccountProfitService {
             String symbol = order.o.s;
 
             double realizedProfit = parseProfit(order.o.rp);
+            handleOrderUpdate(order.o);
 
+            // 🔹 PROFIT kezelés
             if ("FILLED".equals(status)) {
                 if ("TRADE".equals(execType)) {
-                    // Ez tényleg trade lezárás -> profit számítás
                     if (realizedProfit != 0.0) {
-
                         if (realizedProfit < 0) {
                             BAD_SYMBOL_LIST.add(BadSymbolsDto.builder()
                                     .symbol(symbol)
@@ -63,16 +63,12 @@ public class AccountProfitService {
                                         formatTradeDetails(order.o),
                                         realizedProfit,
                                         profit));
-                        tradeService.removeFromActiveBySymbol(symbol);
+
                     } else {
-                        // New position
+                        // új pozíció
                         tradeClosedUpdated(
                                 String.format("🚀 New trade opened:\n%s",
                                         formatTradeDetails(order.o)));
-
-                        OrderTradeUpdateDto.Order binanceOrder = order.o;
-                        OrderDto myOrder = OrderMapper.fromBinanceOrder(binanceOrder);
-                        tradeService.moveOrderToActive(myOrder);
                     }
                 }
             } else {
@@ -80,6 +76,78 @@ public class AccountProfitService {
             }
         }
     }
+
+    public void handleOrderUpdate(OrderTradeUpdateDto.Order order) {
+        String status = order.X; // Status
+        String execType = order.x; // Execution type
+        String type = order.o;     // Order type
+        String symbol = order.s;
+        long orderId = order.i;
+
+        double realizedProfit = Double.parseDouble(order.rp);
+
+        // --- LIMIT ORDERS ---
+        if ("LIMIT".equals(type)) {
+            if ("NEW".equals(status)) {
+                boolean exists = TradeService.orderDtoList.stream()
+                        .anyMatch(o -> o.getOrderId() == orderId);
+
+                if (!exists) {
+                    OrderDto dto = OrderMapper.fromBinanceOrder(order);
+                    TradeService.orderDtoList.add(dto);
+                    log.info("➕ Open order added: {} ({})", symbol, orderId);
+                } else {
+                    log.debug("⚠️ Duplicate NEW order ignored: {} ({})", symbol, orderId);
+                }
+            } else if ("PARTIALLY_FILLED".equals(status)) {
+                TradeService.orderDtoList.stream()
+                        .filter(o -> o.getOrderId() == orderId)
+                        .findFirst()
+                        .ifPresent(o -> {
+                            o.setExecutedQty(BigDecimal.valueOf(Double.parseDouble(order.z)));
+                            o.setCumQty(BigDecimal.valueOf(Double.parseDouble(order.z)));
+                            o.setAvgPrice(BigDecimal.valueOf(Double.parseDouble(order.ap)));
+                        });
+                log.info("✏️ Open order updated (partial fill): {} ({})", symbol, orderId);
+            } else if ("FILLED".equals(status)) {
+                TradeService.orderDtoList.removeIf(o -> o.getOrderId() == orderId);
+                log.info("❌ Open order removed: {} ({})", symbol, orderId);
+
+                OrderDto myOrder = OrderMapper.fromBinanceOrder(order);
+                tradeService.moveOrderToActive(myOrder);
+                log.info("✅ LIMIT order moved to active trades: {} ({})", symbol, orderId);
+            } else if ("CANCELED".equals(status)) {
+                TradeService.orderDtoList.removeIf(o -> o.getOrderId() == orderId);
+                log.info("❌ Open order canceled: {} ({})", symbol, orderId);
+            }
+        } else if ("MARKET".equals(type)) {
+            if ("FILLED".equals(status) || "PARTIALLY_FILLED".equals(status)) {
+                if (realizedProfit != 0.0) {
+                    // Trade closed → profit/loss accounted
+                    profit += realizedProfit;
+                    updateWinLose(realizedProfit);
+                    tradeService.removeFromActiveBySymbol(symbol);
+
+                    log.info("✅ Trade closed: {} | Profit/Loss: {}", symbol, realizedProfit);
+                } else {
+                    // New position opened → only add once per orderId
+                    boolean exists = TradeService.activeOrderList.stream()
+                            .anyMatch(o -> o.getOrderId() == orderId);
+
+                    if (!exists) {
+                        OrderDto myOrder = OrderMapper.fromBinanceOrder(order);
+                        tradeService.moveOrderToActive(myOrder);
+                        log.info("🚀 New trade opened: {} ({})", symbol, orderId);
+                    } else {
+                        log.debug("⚠️ Duplicate MARKET update ignored: {} ({})", symbol, orderId);
+                    }
+                }
+            }
+        }
+
+    }
+
+
 
     private double parseProfit(String rp) {
         return (rp != null && !rp.isEmpty()) ? Double.parseDouble(rp) : 0.0;

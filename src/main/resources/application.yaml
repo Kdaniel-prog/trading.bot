@@ -10,9 +10,9 @@ binance:
   secretKey: aa5dc12959b2c0205a07f50618fdbe56b7021a68ffe958623338290851138128
 
 trading:
-  stopLimit: -0.76
-  winLimit: 1.54
-  moneyUsdt: 50
+  stopLimit: -0.135
+  winLimit: 0.27
+  moneyUsdt: 20
   maxTrade: 5
   coinMinMonth: 4
   coinType: USDT
