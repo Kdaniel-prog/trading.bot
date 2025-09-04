@@ -32,7 +32,6 @@ import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 @Slf4j
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
@@ -171,7 +170,34 @@ public class BinanceRestClient {
         }
     }
 
-    public boolean cancelOrdersForSymbol(String symbol) {
+    public void changeLeverage(String symbol) {
+        try {
+            Map<String, String> params = new LinkedHashMap<>();
+            params.put("symbol", symbol);
+            params.put("leverage", String.valueOf(tradingConfig.leverage()));
+            params.put("timestamp", String.valueOf(System.currentTimeMillis()));
+
+            String queryString = buildQueryString(params);
+            String signature = util.sign(queryString);
+
+            String finalUrl = config.restBaseUrl() + "/fapi/v1/leverage?" + queryString + "&signature=" + signature;
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(finalUrl))
+                    .header("X-MBX-APIKEY", config.apiKey())
+                    .POST(HttpRequest.BodyPublishers.noBody())
+                    .build();
+
+            HttpResponse<String> resp = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            log.info("Leverage change response: {}", resp.body());
+
+        } catch (Exception e) {
+            log.error("Error changing leverage for {}: {}", symbol, e.getMessage(), e);
+        }
+    }
+
+    public void cancelOrdersForSymbol(String symbol) {
         try {
             Map<String, String> params = new LinkedHashMap<>();
             params.put("symbol", symbol);
@@ -193,17 +219,13 @@ public class BinanceRestClient {
             int status = response.statusCode();
             if (status == 200) {
                 log.info("Successfully canceled all open orders for symbol: {}", symbol);
-                return true;
             } else {
                 log.warn("Failed to cancel orders for symbol: {} | status code: {} | body: {}",
                         symbol, status, response.body());
-                return false;
             }
 
         } catch (Exception e) {
-            String msg = (e.getMessage() != null) ? e.getMessage() : e.toString();
             log.error("Error canceling orders for symbol: {}", symbol, e);
-            return false;
         }
     }
 

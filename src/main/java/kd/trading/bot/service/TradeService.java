@@ -108,6 +108,7 @@ public class TradeService {
 
         //todo lehet kell ez a dto
         TradeDto trade = helper.generateTradeDto(signal, lastPrice, info);
+        restClient.changeLeverage(info.getSymbol());
 
         OrderDto orderDto = restClient.placeOrder(
                 info.getSymbol(),
