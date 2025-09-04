@@ -46,6 +46,7 @@ public class AccountProfitService {
         String type = order.o;     // Order type
         String symbol = order.s;
         long orderId = order.i;
+        String clientOrderId = order.c;
 
         double realizedProfit = Double.parseDouble(order.rp);
 
@@ -53,7 +54,7 @@ public class AccountProfitService {
         if ("LIMIT".equals(type)) {
             if ("NEW".equals(status)) {
                 boolean exists = TradeService.orderDtoList.stream()
-                        .anyMatch(o -> o.getOrderId() == orderId);
+                        .anyMatch(o -> o.getClientOrderId().equals(clientOrderId));
 
                 if (!exists) {
                     OrderDto dto = OrderMapper.fromBinanceOrder(order);
@@ -64,7 +65,7 @@ public class AccountProfitService {
                 }
             } else if ("PARTIALLY_FILLED".equals(status)) {
                 TradeService.orderDtoList.stream()
-                        .filter(o -> o.getOrderId() == orderId)
+                        .filter(o -> o.getClientOrderId().equals(clientOrderId))
                         .findFirst()
                         .ifPresent(o -> {
                             o.setExecutedQty(BigDecimal.valueOf(Double.parseDouble(order.z)));
@@ -80,7 +81,7 @@ public class AccountProfitService {
                 tradeService.moveOrderToActive(myOrder);
                 log.info("✅ LIMIT order moved to active trades: {} ({})", symbol, orderId);
             } else if ("CANCELED".equals(status)) {
-                TradeService.orderDtoList.removeIf(o -> o.getOrderId() == orderId);
+                TradeService.orderDtoList.removeIf(o -> o.getClientOrderId().equals(clientOrderId));
                 log.info("❌ Open order canceled: {} ({})", symbol, orderId);
             }
         } else if ("MARKET".equals(type)) {
@@ -101,7 +102,7 @@ public class AccountProfitService {
                 } else {
                     // New position opened → only add once per orderId
                     boolean exists = TradeService.activeOrderList.stream()
-                            .anyMatch(o -> o.getOrderId() == orderId);
+                            .anyMatch(o -> o.getClientOrderId().equals(clientOrderId));
 
                     if (!exists) {
                         OrderDto myOrder = OrderMapper.fromBinanceOrder(order);
