@@ -85,13 +85,11 @@ public class AccountProfitService {
                 log.info("❌ Open order canceled: {} ({})", symbol, orderId);
             }
         } else if ("MARKET".equals(type)) {
-            if ("FILLED".equals(status) || "PARTIALLY_FILLED".equals(status)) {
+
+            if("FILLED".equals(status)) {
                 if (realizedProfit != 0.0) {
-                    // Trade closed → profit/loss accounted
                     profit += realizedProfit;
                     updateWinLose(realizedProfit);
-                    tradeService.removeFromActiveBySymbol(symbol);
-
                     tradeClosedUpdated(
                             String.format("✅ Trade closed:\n%s\nProfit/Loss: %.2f USDC | Total profit: %.2f USDC",
                                     formatTradeDetails(order),
@@ -99,6 +97,16 @@ public class AccountProfitService {
                                     profit));
 
                     log.info("✅ Trade closed: {} | Profit/Loss: {}", symbol, realizedProfit);
+
+                    if(realizedProfit < 0.0) BAD_SYMBOL_LIST.add(new BadSymbolsDto(symbol, LocalDateTime.now()));
+
+                }
+            }
+
+            if ("FILLED".equals(status) || "PARTIALLY_FILLED".equals(status)) {
+                if (realizedProfit != 0.0) {
+                    // Trade closed → profit/loss accounted
+                    tradeService.removeFromActiveBySymbol(symbol);
                 } else {
                     // New position opened → only add once per orderId
                     boolean exists = TradeService.activeOrderList.stream()

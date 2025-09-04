@@ -10,10 +10,12 @@ binance:
   secretKey: aa5dc12959b2c0205a07f50618fdbe56b7021a68ffe958623338290851138128
 
 trading:
-  stopLimit: -0.135
-  winLimit: 0.27
+  stopLimit: -0.635 # 12%
+  winLimit: 1.90 # 35 %
+
   moneyUsdt: 20
   maxTrade: 5
+
   coinMinMonth: 4
   coinType: USDT
   leverage: 20 #ez binancen x20 van nekem alapből.
