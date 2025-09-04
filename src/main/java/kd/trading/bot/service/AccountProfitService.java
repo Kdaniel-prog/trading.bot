@@ -36,44 +36,7 @@ public class AccountProfitService {
 
         if (dto instanceof OrderTradeUpdateDto order) {
             log.warn("{}", dto);
-            String status = order.o.X;   // Order státusz (FILLED, NEW, stb.)
-            String execType = order.o.x; // Execution type (TRADE, NEW, EXPIRED, stb.)
-            String type = order.o.o;     // Order típus (MARKET, LIMIT)
-            String symbol = order.o.s;
-
-            double realizedProfit = parseProfit(order.o.rp);
             handleOrderUpdate(order.o);
-
-            // 🔹 PROFIT kezelés
-            if ("FILLED".equals(status)) {
-                if ("TRADE".equals(execType)) {
-                    if (realizedProfit != 0.0) {
-                        if (realizedProfit < 0) {
-                            BAD_SYMBOL_LIST.add(BadSymbolsDto.builder()
-                                    .symbol(symbol)
-                                    .stamp(LocalDateTime.now())
-                                    .build());
-                        }
-
-                        profit += realizedProfit;
-                        updateWinLose(realizedProfit);
-
-                        tradeClosedUpdated(
-                                String.format("✅ Trade closed:\n%s\nProfit/Loss: %.2f USDC | Total profit: %.2f USDC",
-                                        formatTradeDetails(order.o),
-                                        realizedProfit,
-                                        profit));
-
-                    } else {
-                        // új pozíció
-                        tradeClosedUpdated(
-                                String.format("🚀 New trade opened:\n%s",
-                                        formatTradeDetails(order.o)));
-                    }
-                }
-            } else {
-                log.debug("Unhandled status {} / execType {} for {}", status, execType, symbol);
-            }
         }
     }
 
@@ -128,6 +91,12 @@ public class AccountProfitService {
                     updateWinLose(realizedProfit);
                     tradeService.removeFromActiveBySymbol(symbol);
 
+                    tradeClosedUpdated(
+                            String.format("✅ Trade closed:\n%s\nProfit/Loss: %.2f USDC | Total profit: %.2f USDC",
+                                    formatTradeDetails(order),
+                                    realizedProfit,
+                                    profit));
+
                     log.info("✅ Trade closed: {} | Profit/Loss: {}", symbol, realizedProfit);
                 } else {
                     // New position opened → only add once per orderId
@@ -138,6 +107,10 @@ public class AccountProfitService {
                         OrderDto myOrder = OrderMapper.fromBinanceOrder(order);
                         tradeService.moveOrderToActive(myOrder);
                         log.info("🚀 New trade opened: {} ({})", symbol, orderId);
+                        // új pozíció
+                        tradeClosedUpdated(
+                                String.format("🚀 New trade opened:\n%s",
+                                        formatTradeDetails(order)));
                     } else {
                         log.debug("⚠️ Duplicate MARKET update ignored: {} ({})", symbol, orderId);
                     }
