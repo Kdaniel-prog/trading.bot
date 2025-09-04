@@ -31,9 +31,13 @@ public class TradingBot implements MarketDataListener, AccountDataListener {
      AccountProfitService accountProfitService;
      TradeCheckingService checkingService;
      BinanceConfig binanceConfig;
+     TradeService tradeService;
 
     @PostConstruct
     private void init() throws URISyntaxException {
+        // 0. get active trades (if app restart we will load the trades)
+        tradeService.loadActiveOrdersOnStartup();
+
         //1. start Binance market ws
         String wsUrlMain = "wss://fstream.binance.com/stream?streams=!ticker@arr";
         BinanceMarketWebSocketClient client = new BinanceMarketWebSocketClient(new URI(wsUrlMain), this);

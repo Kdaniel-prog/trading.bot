@@ -11,6 +11,7 @@ public record TradingConfig(
         Integer maxTrade,
         String coinType,
         Integer coinMinMonth,
-        Integer leverage
+        Integer leverage,
+        Double swipeValue
 ) {
 }

@@ -20,6 +20,7 @@ import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static kd.trading.bot.service.TradeService.BAD_SYMBOL_LIST;
 
@@ -93,6 +94,7 @@ public class TradeCheckingService {
         }
 
         updateLastResult(results);
+        swipeCoins(results);
     }
 
     private void updateLastResult(Map<OrderDto, PnlResult> results) {
@@ -131,6 +133,29 @@ public class TradeCheckingService {
                 .multiply(BigDecimal.valueOf(100));
 
         return new PnlResult(currentPrice, entryPrice, qty, pnlAbs, pnlPercent, isLong);
+    }
+
+    private void swipeCoins(Map<OrderDto, PnlResult> tradeInfos) {
+        BigDecimal allProfit = BigDecimal.ZERO;
+
+        for (Map.Entry<OrderDto, PnlResult> entry : tradeInfos.entrySet()) {
+            PnlResult pnl = entry.getValue();
+            if (pnl != null && pnl.getPnlAbs() != null) {
+                allProfit = allProfit.add(
+                        pnl.getPnlAbs().setScale(4, RoundingMode.HALF_UP)
+                );
+            }
+        }
+
+        // ha az összes profit >= 0.5
+        if (allProfit.compareTo(BigDecimal.valueOf(tradingConfig.swipeValue())) >= 0) {
+            // itt zárjuk az összes aktív ordert
+            tradeInfos.keySet().forEach(order -> {
+                tradeService.closeOrder(order);
+            });
+        }
+
+        log.info("Swipe all coins value: {}", allProfit);
     }
 
     /**

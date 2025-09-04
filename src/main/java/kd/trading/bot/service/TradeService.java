@@ -171,4 +171,27 @@ public class TradeService {
             log.error("Exception while closing order {}", order.getSymbol(), e);
         }
     }
+
+    public void loadActiveOrdersOnStartup() {
+        try {
+            // Aktív orderek lekérése a BinanceRestClient segítségével
+            List<OrderDto> activeOrdersFromApi = restClient.getActiveOrders();
+
+            if (activeOrdersFromApi != null && !activeOrdersFromApi.isEmpty()) {
+                activeOrderList.clear();
+                activeOrderList.addAll(activeOrdersFromApi);
+
+                // ha az összes order listába is kell
+                orderDtoList.addAll(activeOrdersFromApi);
+
+                System.out.println("Aktív orderek betöltve: " + activeOrdersFromApi.size());
+            } else {
+                System.out.println("Nincsenek aktív orderek induláskor.");
+            }
+
+        } catch (Exception e) {
+            System.err.println("Hiba történt az aktív orderek betöltésekor: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
 }

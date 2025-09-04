@@ -19,6 +19,8 @@ trading:
   coinType: USDT
   leverage: 20 #ez binancen x20 van nekem alapből.
 
+  swipeValue: 0.50
+
 telegram:
   username: zzpastabot
   token: 8488123185:AAHLPGTDoNycCt-We9W-Pxd5w2OBgRsdtFo

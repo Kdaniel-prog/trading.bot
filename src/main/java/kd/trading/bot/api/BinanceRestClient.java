@@ -29,6 +29,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -132,7 +133,7 @@ public class BinanceRestClient {
 
     public OrderDto placeOrder(String symbol, BigDecimal qty, BigDecimal price, Signal signal) {
         try {
-            String side = signal == Signal.LONG ? "SELL" : "BUY";
+            String side = signal == Signal.LONG ? "BUY" : "SELL";
 
             Map<String, String> params = new LinkedHashMap<>();
             params.put("symbol", symbol);
@@ -294,5 +295,51 @@ public class BinanceRestClient {
                 .map(e -> e.getKey() + "=" + URLEncoder.encode(e.getValue(), StandardCharsets.UTF_8))
                 .reduce((a, b) -> a + "&" + b)
                 .orElse("");
+    }
+
+    public List<OrderDto> getActiveOrders() {
+        List<OrderDto> activeOrders = new ArrayList<>();
+        try {
+            Map<String, String> params = new LinkedHashMap<>();
+            params.put("timestamp", String.valueOf(System.currentTimeMillis()));
+
+            String queryString = buildQueryString(params);
+            String signature = util.sign(queryString);
+
+            String finalUrl = config.restBaseUrl() + "/fapi/v2/positionRisk?" + queryString + "&signature=" + signature;
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(finalUrl))
+                    .header("X-MBX-APIKEY", config.apiKey())
+                    .GET()
+                    .build();
+
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() == 200) {
+                String body = response.body();
+
+                ObjectMapper mapper = new ObjectMapper();
+                List<Map<String, Object>> positions = mapper.readValue(body, new TypeReference<>() {});
+
+                for (Map<String, Object> pos : positions) {
+                    BigDecimal amt = new BigDecimal((String) pos.get("positionAmt"));
+
+                    // Csak azokat adjuk vissza, ahol valóban van pozíció (nem üres)
+                    if (amt.compareTo(BigDecimal.ZERO) != 0) {
+                        OrderDto dto = parser.mapToOrderDto(pos);
+                        activeOrders.add(dto);
+                    }
+                }
+
+                log.info("Aktív pozíciók száma: {}", activeOrders.size());
+            } else {
+                log.error("Nem sikerült lekérdezni a pozíciókat: {} - {}", response.statusCode(), response.body());
+            }
+
+        } catch (Exception e) {
+            log.error("Hiba a pozíciók lekérdezésekor", e);
+        }
+        return activeOrders;
     }
 }
