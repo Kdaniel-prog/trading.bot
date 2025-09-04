@@ -61,7 +61,8 @@ public class MessageParser {
             dto.setOrigQty(qty.abs()); // eredeti mennyiség
             dto.setExecutedQty(qty.abs()); // már teljesült
             dto.setCumQty(qty.abs());
-
+            dto.setClientOrderId((String) pos.get("clientId"));
+            dto.setOrderId((Long) pos.get("orderId"));
             // entry price és current price
             dto.setPrice(new BigDecimal((String) pos.get("entryPrice")));
             dto.setAvgPrice(new BigDecimal((String) pos.get("markPrice")));

@@ -74,7 +74,7 @@ public class AccountProfitService {
                         });
                 log.info("✏️ Open order updated (partial fill): {} ({})", symbol, orderId);
             } else if ("FILLED".equals(status)) {
-                TradeService.orderDtoList.removeIf(o -> o.getOrderId() == orderId);
+                TradeService.orderDtoList.removeIf(o -> o.getClientOrderId().equals(clientOrderId));
                 log.info("❌ Open order removed: {} ({})", symbol, orderId);
 
                 OrderDto myOrder = OrderMapper.fromBinanceOrder(order);

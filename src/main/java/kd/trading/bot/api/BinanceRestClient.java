@@ -133,7 +133,7 @@ public class BinanceRestClient {
 
     public OrderDto placeOrder(String symbol, BigDecimal qty, BigDecimal price, Signal signal) {
         try {
-            String side = signal == Signal.LONG ? "BUY" : "SELL";
+            String side = signal == Signal.LONG ? "SELL" : "BUY";
 
             Map<String, String> params = new LinkedHashMap<>();
             params.put("symbol", symbol);
