@@ -1,6 +1,7 @@
 package kd.trading.bot.core;
 
 import jakarta.annotation.PostConstruct;
+import kd.trading.bot.config.binance.BinanceConfig;
 import kd.trading.bot.interfaces.AccountDataListener;
 import kd.trading.bot.interfaces.MarketDataListener;
 import kd.trading.bot.model.TradeDto;
@@ -29,7 +30,7 @@ public class TradingBot implements MarketDataListener, AccountDataListener {
      BinanceEventConverter converter;
      AccountProfitService accountProfitService;
      TradeCheckingService checkingService;
-
+     BinanceConfig binanceConfig;
 
     @PostConstruct
     private void init() throws URISyntaxException {
@@ -39,7 +40,7 @@ public class TradingBot implements MarketDataListener, AccountDataListener {
         client.connect();
 
         //2. Start Account Update ws
-        String wsUrl =  "wss://stream.binancefuture.com/ws/" + sessionManager.getListenKey();
+        String wsUrl =  binanceConfig.wsBaseUrl() + sessionManager.getListenKey();
         AccountWebSocketService tradeClient = new AccountWebSocketService(wsUrl,this);
         tradeClient.connect();
     }

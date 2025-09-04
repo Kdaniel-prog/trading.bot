@@ -3,15 +3,14 @@ spring:
     name: bot
 
 binance:
-  restBaseUrl: https://testnet.binancefuture.com
-  wsBaseUrl: wss://stream.binancefuture.com/wsű
-
-  apiKey: 2c8b1824f71f95dc77259ae2d81de508f8e133976a6948c89ea81bff665f589d
-  secretKey: aa5dc12959b2c0205a07f50618fdbe56b7021a68ffe958623338290851138128
+  restBaseUrl: https://fapi.binance.com
+  wsBaseUrl: wss://fstream.binance.com/ws/
+  apiKey: WghAR9Rg17OJ9o8AKU31oT3SqQPK4C2CNHEp6LSBkdiAjwTiIxXD0g0HK7e2aRKu
+  secretKey: 3mwYmwlgp3inM45o5dO1lxzK224HE7bOMh2Ra4vyG3sXNlO8rwiHtztfPb0RUzkE
 
 trading:
-  stopLimit: -0.635 # 12%
-  winLimit: 1.90 # 35 %
+  stopLimit: -0.635 # 4%
+  winLimit: 1.30 # 7 %
 
   moneyUsdt: 20
   maxTrade: 5
