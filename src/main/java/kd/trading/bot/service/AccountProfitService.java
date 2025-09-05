@@ -58,6 +58,7 @@ public class AccountProfitService {
 
                 if (!exists) {
                     OrderDto dto = OrderMapper.fromBinanceOrder(order);
+                    dto.setStarted(LocalDateTime.now());
                     TradeService.orderDtoList.add(dto);
                     log.info("➕ Open order added: {} ({})", symbol, orderId);
                 } else {

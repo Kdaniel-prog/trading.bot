@@ -117,17 +117,15 @@ public class TradeService {
                 signal
         );
 
-        if(orderDto != null) orderDtoList.add(orderDto);
-        log.info("Open trade sent");
-
-        // ha 1 perc múlva sincs update, akkor töröljük
-        scheduler.schedule(() -> {
-            if (orderDtoList.contains(orderDto)) {
-                assert orderDto != null;
-                log.info("Order {} timed out -> attempting cancel on Binance", orderDto.getSymbol());
-                restClient.cancelOrdersForSymbol(orderDto.getSymbol());
-            }
-        }, 2, TimeUnit.MINUTES);
+        if(orderDto != null) {
+            // ha 1 perc múlva sincs update, akkor töröljük
+            scheduler.schedule(() -> {
+                if (orderDtoList.contains(orderDto)) {
+                    log.info("Order {} timed out -> attempting cancel on Binance", orderDto.getSymbol());
+                    restClient.cancelOrdersForSymbol(orderDto.getSymbol());
+                }
+            }, 2, TimeUnit.MINUTES);
+        }
     }
 
     public Integer getListSize() {

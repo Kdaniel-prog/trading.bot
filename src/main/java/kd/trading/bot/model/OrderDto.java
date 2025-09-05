@@ -10,7 +10,6 @@ import java.time.LocalDateTime;
 @Data
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class OrderDto {
-
     private Long orderId;
     private String symbol;
     private OrderStatus status;        // rendelés státusza (NEW = order bookban, FILLED = teljesült, CANCELED = törölt)
