@@ -19,7 +19,11 @@ trading:
   coinType: USDT
   leverage: 20 #ez binancen x20 van nekem alapből.
 
-  swipeValue: 0.1960
+  swipeValue: 0.1960,
+  banSymbol:
+    - 1000SATSUSDT # -0.25
+    - 1000CATUSDT # -0.44
+    - ACHUSDT # -0.27
 
 telegram:
   username: zzpastabot

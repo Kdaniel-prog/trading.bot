@@ -42,6 +42,7 @@ public class TradeService {
     public static final List<OrderDto> activeOrderList = new CopyOnWriteArrayList<>();
 
     public static final Set<BadSymbolsDto> BAD_SYMBOL_LIST = new HashSet<>();
+    public static final Set<String> BANNED_SYMBOL = new HashSet<>();
 
     // --- queue + worker thread ---
     private final BlockingQueue<Runnable> tradeQueue = new LinkedBlockingQueue<>();

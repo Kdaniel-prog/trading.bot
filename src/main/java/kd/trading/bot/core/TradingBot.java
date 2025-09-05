@@ -2,6 +2,7 @@ package kd.trading.bot.core;
 
 import jakarta.annotation.PostConstruct;
 import kd.trading.bot.config.binance.BinanceConfig;
+import kd.trading.bot.config.trading.TradingConfig;
 import kd.trading.bot.interfaces.AccountDataListener;
 import kd.trading.bot.interfaces.MarketDataListener;
 import kd.trading.bot.model.TradeDto;
@@ -32,11 +33,13 @@ public class TradingBot implements MarketDataListener, AccountDataListener {
      TradeCheckingService checkingService;
      BinanceConfig binanceConfig;
      TradeService tradeService;
+     TradingConfig tradingConfig;
 
     @PostConstruct
     private void init() throws URISyntaxException {
         // 0. get active trades (if app restart we will load the trades)
         tradeService.loadActiveOrdersOnStartup();
+        TradeService.BANNED_SYMBOL.addAll(tradingConfig.banSymbol());
 
         //1. start Binance market ws
         String wsUrlMain = "wss://fstream.binance.com/stream?streams=!ticker@arr";

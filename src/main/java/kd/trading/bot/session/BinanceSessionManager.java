@@ -36,7 +36,7 @@ public class BinanceSessionManager {
     /**
      * 60 percenként frissül a listenKey
      */
-    @Scheduled(fixedRate = 60 * 60 * 1000)
+    @Scheduled(fixedRate = 50 * 60 * 1000)
     public void refreshListenKey() {
         if (listenKey == null || listenKey.isEmpty()) {
             log.warn("No listenKey found, creating new...");
