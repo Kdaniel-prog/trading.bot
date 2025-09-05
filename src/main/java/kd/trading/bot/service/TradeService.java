@@ -180,9 +180,6 @@ public class TradeService {
                 activeOrderList.clear();
                 activeOrderList.addAll(activeOrdersFromApi);
 
-                // ha az összes order listába is kell
-                orderDtoList.addAll(activeOrdersFromApi);
-
                 log.info("Aktív orderek betöltve: {}", activeOrdersFromApi.size());
             } else {
                 log.info("Nincsenek aktív orderek induláskor.");

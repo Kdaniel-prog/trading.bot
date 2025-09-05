@@ -328,6 +328,7 @@ public class BinanceRestClient {
                     // Csak azokat adjuk vissza, ahol valóban van pozíció (nem üres)
                     if (amt.compareTo(BigDecimal.ZERO) != 0) {
                         OrderDto dto = parser.mapToOrderDto(pos);
+                        dto.setIsLoaded(true);
                         activeOrders.add(dto);
                     }
                 }

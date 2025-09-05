@@ -111,7 +111,13 @@ public class AccountProfitService {
                 } else {
                     // New position opened → only add once per orderId
                     boolean exists = TradeService.activeOrderList.stream()
-                            .anyMatch(o -> o.getClientOrderId().equals(clientOrderId));
+                            .anyMatch(o ->{
+                                if(o.getIsLoaded()) {
+                                    return false;
+                                } else {
+                                   return o.getClientOrderId().equals(clientOrderId);
+                                }
+                            });
 
                     if (!exists) {
                         OrderDto myOrder = OrderMapper.fromBinanceOrder(order);

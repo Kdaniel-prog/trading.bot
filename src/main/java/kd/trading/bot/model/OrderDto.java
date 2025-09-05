@@ -35,4 +35,5 @@ public class OrderDto {
     private Long goodTillDate;         // ha GTE_GTD, akkor meddig aktív
     private Long updateTime;           // utolsó frissítés időbélyeg
     private LocalDateTime started;
+    private Boolean isLoaded;
 }
