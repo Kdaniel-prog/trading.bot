@@ -133,7 +133,7 @@ public class BinanceRestClient {
 
     public OrderDto placeOrder(String symbol, BigDecimal qty, BigDecimal price, Signal signal) {
         try {
-            String side = signal == Signal.LONG ? "BUY" : "SELL";
+            String side = signal == Signal.LONG ? "SELL" : "BUY";
 
             Map<String, String> params = new LinkedHashMap<>();
             params.put("symbol", symbol);
@@ -332,8 +332,6 @@ public class BinanceRestClient {
                         activeOrders.add(dto);
                     }
                 }
-
-                log.info("Aktív pozíciók száma: {}", activeOrders.size());
             } else {
                 log.error("Nem sikerült lekérdezni a pozíciókat: {} - {}", response.statusCode(), response.body());
             }

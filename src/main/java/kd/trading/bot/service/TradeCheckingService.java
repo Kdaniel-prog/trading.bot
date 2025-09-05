@@ -76,10 +76,10 @@ public class TradeCheckingService {
                         if (order.getStarted() != null) {
                             Duration openDuration = Duration.between(order.getStarted(), LocalDateTime.now());
 
-                            if (openDuration.toMinutes() >= 100) {
+                            if (openDuration.toMinutes() >= 10) {
                                 BigDecimal absPercent = pnl.getPnlPercent().abs();
 
-                                if (absPercent.compareTo(BigDecimal.valueOf(1.0)) < 0) {
+                                if (absPercent.compareTo(BigDecimal.valueOf(0.13)) < 0) {
                                     BAD_SYMBOL_LIST.add(BadSymbolsDto.builder()
                                                     .symbol(order.getSymbol())
                                                     .stamp(LocalDateTime.now())

@@ -171,6 +171,21 @@ public class TradeService {
         }
     }
 
+    @Scheduled(fixedRate = 5 * 60 * 1000)
+    public void checkOpenOrdes() {
+        orderDtoList.removeIf(orderDto -> {
+            if (orderDto.getStarted() != null) {
+                Duration openDuration = Duration.between(orderDto.getStarted(), LocalDateTime.now());
+                if (openDuration.toMinutes() >= 5) {
+                    closeOrder(orderDto);
+                    return true; // töröljük a listából
+                }
+            }
+            return false;
+        });
+    }
+
+
     public void loadActiveOrdersOnStartup() {
         try {
             // Aktív orderek lekérése a BinanceRestClient segítségével
