@@ -1,13 +1,13 @@
 package kd.trading.bot.service;
 
 import kd.trading.bot.config.trading.TradingConfig;
-import kd.trading.bot.enums.OrderSide;
 import kd.trading.bot.enums.Signal;
 import kd.trading.bot.model.BinanceTickerData;
 import kd.trading.bot.model.CoinAnalysis;
 import kd.trading.bot.model.OrderDto;
 import kd.trading.bot.model.SymbolInfo;
-import kd.trading.bot.service.ratingProcess.AlgorithmService;
+import kd.trading.bot.service.ratingProcess.algorithm.EmaAlgoService;
+import kd.trading.bot.service.ratingProcess.algorithm.SwingAlgoService;
 import kd.trading.bot.service.ratingProcess.AthFilterService;
 import kd.trading.bot.service.ratingProcess.RankingService;
 import kd.trading.bot.service.ratingProcess.TickerPrefilterService;
@@ -19,8 +19,6 @@ import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.List;
 import java.util.Set;
 
@@ -33,9 +31,11 @@ public class MarketDataPipelineService {
     final TickerPrefilterService prefilterService;
     final AthFilterService athFilterService;
     final RankingService rankingService;
-    final AlgorithmService algorithmService;
     final TradingConfig tradingConfig;
     final TradeService tradeService;
+
+    final SwingAlgoService algorithmService;
+    final EmaAlgoService emaAlgoService;
 
     @Getter
     volatile RankingService.RankedCoins latestResult = new RankingService.RankedCoins(List.of(), List.of());
@@ -44,11 +44,11 @@ public class MarketDataPipelineService {
         try {
             //0. lépés nézzük meg hogy van e már 5 active tradünk
             if(tradeService.getListSize() >= tradingConfig.maxTrade()) return;
-            log.info("check tradeservice 0");
+            log.info("Check tradeservice 0: trade limit");
             // 1. parse
             List<BinanceTickerData> tickers = parser.parseMarketMessage(message);
             if (tickers.isEmpty()) return;
-            log.info("check tradeservice 1");
+            log.info("check tradeservice 1: ");
 
             // 2. prefilter
             List<BinanceTickerData> prefiltered = prefilterService.prefilter(tickers, tradableSymbols);
@@ -62,7 +62,7 @@ public class MarketDataPipelineService {
 
             // 4. analysis
             List<CoinAnalysis> analyzed = athFiltered.stream()
-                    .map(ticker -> algorithmService.analyzeSwingCoin(ticker.getSymbol(), ticker.getLastPrice()) )
+                    .map(ticker -> algorithmService.analyzeCoin(ticker.getSymbol(), ticker.getLastPrice()) )
                     .toList();
             if (analyzed.isEmpty()) return;
             log.info("check tradeservice 4");
@@ -72,7 +72,18 @@ public class MarketDataPipelineService {
 
             // 5. ranking
             latestResult = rankingService.rank(analyses);
-            log.info("Coins Rated!");
+
+            // logoljuk a top és bottom coinokat
+            log.info("---- Ranking Results ----");
+            latestResult.top().forEach(c ->
+                    log.info("TOP  -> {} | score={} | signal={} | price={}",
+                            c.getSymbol(), c.getScore(), c.getSignal(), c.getLastPrice())
+            );
+            latestResult.bottom().forEach(c ->
+                    log.info("BOTTOM -> {} | score={} | signal={} | price={}",
+                            c.getSymbol(), c.getScore(), c.getSignal(), c.getLastPrice())
+            );
+            log.info("---- End Ranking ----");
 
             //6. trade
             runTradingCycle(tradableSymbols);
@@ -103,7 +114,7 @@ public class MarketDataPipelineService {
                     .filter(s -> s.getSymbol().equals(t.getSymbol()))
                     .findFirst()
                     .ifPresent(symbol ->
-                            tradeService.openTrade(t.getSignal(), BigDecimal.valueOf(t.getLastPrice()), symbol)
+                            tradeService.openTrade(t, symbol)
                     );
             });
 
@@ -115,7 +126,7 @@ public class MarketDataPipelineService {
                     .filter(s -> s.getSymbol().equals(t.getSymbol()))
                     .findFirst()
                     .ifPresent(symbol ->
-                        tradeService.openTrade(t.getSignal(), BigDecimal.valueOf(t.getLastPrice()), symbol)
+                        tradeService.openTrade(t, symbol)
                     );
             });
     }

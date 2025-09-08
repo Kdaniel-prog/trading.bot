@@ -3,22 +3,22 @@ spring:
     name: bot
 
 binance:
-  restBaseUrl: https://fapi.binance.com
-  wsBaseUrl: wss://fstream.binance.com/ws/
-  apiKey: WghAR9Rg17OJ9o8AKU31oT3SqQPK4C2CNHEp6LSBkdiAjwTiIxXD0g0HK7e2aRKu
-  secretKey: 3mwYmwlgp3inM45o5dO1lxzK224HE7bOMh2Ra4vyG3sXNlO8rwiHtztfPb0RUzkE
+  restBaseUrl: https://testnet.binancefuture.com
+  wsBaseUrl: wss://stream.binancefuture.com/ws/
+  apiKey: 2c8b1824f71f95dc77259ae2d81de508f8e133976a6948c89ea81bff665f589d
+  secretKey: aa5dc12959b2c0205a07f50618fdbe56b7021a68ffe958623338290851138128
 
 trading:
-  stopLimit: -0.635 # 4%
-  winLimit: 1.30 # 7 %
+  stopLimit: -20.0 # 4%
+  winLimit: 40.00 # 7 %
 
   moneyUsdt: 50
   maxTrade: 5
 
   coinMinMonth: 4
   coinType: USDT
-  leverage: 20 #ez binancen x20 van nekem alapből.
-  swipeValue: 0.09 #0.19 a profit usdt
+  leverage: 3 #ez binancen x20 van nekem alapből.
+  swipeValue: 3.49 #0.19 a profit usdt
   banSymbol:
     - 1000SATSUSDT # -0.25
     - 1000CATUSDT # -0.44
@@ -35,4 +35,10 @@ realBinance:
   wsBaseUrl: wss://fstream.binance.com/ws
   apiKey: WghAR9Rg17OJ9o8AKU31oT3SqQPK4C2CNHEp6LSBkdiAjwTiIxXD0g0HK7e2aRKu
   secretKey: 3mwYmwlgp3inM45o5dO1lxzK224HE7bOMh2Ra4vyG3sXNlO8rwiHtztfPb0RUzkE
+
+testBinance:
+  restBaseUrl: https://testnet.binancefuture.com
+  wsBaseUrl: wss://stream.binancefuture.com/ws/
+  apiKey: 2c8b1824f71f95dc77259ae2d81de508f8e133976a6948c89ea81bff665f589d
+  secretKey: aa5dc12959b2c0205a07f50618fdbe56b7021a68ffe958623338290851138128
 

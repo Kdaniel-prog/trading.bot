@@ -1,4 +1,4 @@
-package kd.trading.bot.service.ratingProcess;
+package kd.trading.bot.service.ratingProcess.algorithm;
 
 import kd.trading.bot.api.BinanceRestClient;
 import kd.trading.bot.enums.Signal;
@@ -13,11 +13,11 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class AlgorithmService {
+public class SwingAlgoService {
 
     private final BinanceRestClient restClient;
 
-    public CoinAnalysis analyzeSwingCoin(String symbol, double lastPrice) {
+    public CoinAnalysis analyzeCoin(String symbol, double lastPrice) {
         try {
             // 1. Lekérjük a napi gyertyákat (kb. 200 napra vissza)
             List<List<Object>> dailyKlines = restClient.getKlines(symbol, "1d", 200);
@@ -80,16 +80,13 @@ public class AlgorithmService {
 
             // 🔹 Jelzés döntés
             Signal signal;
-            if (score >= 4.0) {
+            if (score >= 5.0) {
                 signal = Signal.LONG;
-            } else if (score <= -4.0) {
+            } else if (score <= -5.0) {
                 signal = Signal.SHORT;
             } else {
                 signal = Signal.NO_TRADE;
             }
-
-            log.debug("{} | EMA50: {:.2f}, EMA200: {:.2f}, MACD: {:.2f}/{:.2f}, RSI: {:.2f}, score: {:.1f} => {}",
-                    symbol, ema50, ema200, macdValue, macdSignal, rsi, score, signal);
 
             return new CoinAnalysis(symbol, score, signal, lastPrice);
 

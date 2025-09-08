@@ -94,7 +94,7 @@ public class TradeCheckingService {
         }
 
         updateLastResult(results);
-        swipeCoins(results);
+        //swipeCoins(results);
     }
 
     private void updateLastResult(Map<OrderDto, PnlResult> results) {

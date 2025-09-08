@@ -131,7 +131,7 @@ public class BinanceRestClient {
         }
     }
 
-    public OrderDto placeOrder(String symbol, BigDecimal qty, BigDecimal price, Signal signal) {
+    public void placeOrder(String symbol, BigDecimal qty, BigDecimal price, Signal signal) {
         try {
             String side = signal == Signal.LONG ? "SELL" : "BUY";
 
@@ -159,15 +159,11 @@ public class BinanceRestClient {
 
             if (resp == null || resp.body() == null) {
                 log.error("Null or empty HTTP response for symbol {}", symbol);
-                return new OrderDto();
             }
-
-            return parser.parseOrder(resp.body());
 
         } catch (Exception e) {
             String msg = (e.getMessage() != null) ? e.getMessage() : e.toString();
             log.error("Error placing order for {}: {}", symbol, msg, e);
-            return new OrderDto();
         }
     }
 

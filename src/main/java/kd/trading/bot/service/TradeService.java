@@ -4,18 +4,15 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import kd.trading.bot.api.BinanceRestClient;
 import kd.trading.bot.config.trading.TradingConfig;
-import kd.trading.bot.enums.OrderSide;
 import kd.trading.bot.enums.Signal;
-import kd.trading.bot.model.BadSymbolsDto;
-import kd.trading.bot.model.OrderDto;
-import kd.trading.bot.model.SymbolInfo;
-import kd.trading.bot.model.TradeDto;
+import kd.trading.bot.model.*;
 import kd.trading.bot.util.TradeServiceHelper;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
+import org.modelmapper.ModelMapper;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -24,6 +21,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.*;
 
@@ -35,6 +33,7 @@ public class TradeService {
     BinanceRestClient restClient;
     TradingConfig tradingConfig;
     TradeServiceHelper helper;
+    static ModelMapper modelMapper;
 
     @Getter
     public static final List<OrderDto> orderDtoList = new CopyOnWriteArrayList<>();
@@ -91,42 +90,33 @@ public class TradeService {
     }
 
     // --- Trade nyitása ---
-    public void openTrade(Signal signal, BigDecimal lastPrice, SymbolInfo info) {
-        tradeQueue.offer(() -> makeTrade(signal, lastPrice, info));
+    public void openTrade(CoinAnalysis coinAnalysis, SymbolInfo symbol) {
+        tradeQueue.offer(() -> makeTrade(coinAnalysis, symbol));
     }
 
-    private void makeTrade(Signal signal, BigDecimal lastPrice, SymbolInfo info) {
+    private void makeTrade(CoinAnalysis coinAnalysis, SymbolInfo symbol) {
         log.warn("list size: {} | max trade : {}", getListSize(), tradingConfig.maxTrade());
         if (getListSize() > tradingConfig.maxTrade()) {
-            log.info("Max trades reached, skipping {}", info.getSymbol());
+            log.info("Max trades reached, skipping {}", coinAnalysis.getSymbol());
             return;
         }
 
-        if (checkIfContainsSymbol(info.getSymbol()) ) {
-            log.info("Symbol {} is in activeTrades or OpenTrades, skipping", info.getSymbol());
+        if (checkIfContainsSymbol(coinAnalysis.getSymbol()) ) {
+            log.info("Symbol {} is in activeTrades or OpenTrades, skipping", coinAnalysis.getSymbol());
             return;
         }
 
         //todo lehet kell ez a dto
-        TradeDto trade = helper.generateTradeDto(signal, lastPrice, info);
-        restClient.changeLeverage(info.getSymbol());
+        TradeDto trade = helper.generateTradeDto(coinAnalysis.getSignal(), BigDecimal.valueOf(coinAnalysis.getLastPrice()), symbol);
+        restClient.changeLeverage(coinAnalysis.getSymbol());
 
-        OrderDto orderDto = restClient.placeOrder(
-                info.getSymbol(),
+        restClient.placeOrder(
+                coinAnalysis.getSymbol(),
                 trade.getQuantity(),
                 trade.getEntryPrice(),
-                signal
+                coinAnalysis.getSignal()
         );
 
-        if(orderDto != null) {
-            // ha 1 perc múlva sincs update, akkor töröljük
-            scheduler.schedule(() -> {
-                if (orderDtoList.contains(orderDto)) {
-                    log.info("Order {} timed out -> attempting cancel on Binance", orderDto.getSymbol());
-                    restClient.cancelOrdersForSymbol(orderDto.getSymbol());
-                }
-            }, 2, TimeUnit.MINUTES);
-        }
     }
 
     public Integer getListSize() {
