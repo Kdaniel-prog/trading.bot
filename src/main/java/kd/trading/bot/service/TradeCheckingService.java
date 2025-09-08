@@ -79,11 +79,8 @@ public class TradeCheckingService {
                             if (openDuration.toMinutes() >= 10) {
                                 BigDecimal absPercent = pnl.getPnlPercent().abs();
 
-                                if (absPercent.compareTo(BigDecimal.valueOf(0.13)) < 0) {
-                                    BAD_SYMBOL_LIST.add(BadSymbolsDto.builder()
-                                                    .symbol(order.getSymbol())
-                                                    .stamp(LocalDateTime.now())
-                                            .build());
+                                if (absPercent.doubleValue() < 0.11){
+
                                     log.info("TIMEOUT triggered on {} ({}min, pnl={}%) -> closing trade",
                                             order.getSymbol(), openDuration.toMinutes(), pnl.getPnlPercent());
                                     tradeService.closeOrder(order);
