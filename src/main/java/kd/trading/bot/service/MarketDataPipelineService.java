@@ -48,24 +48,24 @@ public class MarketDataPipelineService {
             // 1. parse
             List<BinanceTickerData> tickers = parser.parseMarketMessage(message);
             if (tickers.isEmpty()) return;
-            log.info("check tradeservice 1: ");
+            log.info("check tradeservice 1: parse");
 
             // 2. prefilter
             List<BinanceTickerData> prefiltered = prefilterService.prefilter(tickers, tradableSymbols);
             if (prefiltered.isEmpty()) return;
-            log.info("check tradeservice 2");
+            log.info("check tradeservice 2: prefilter");
 
             // 3. ath filter
             List<BinanceTickerData> athFiltered = athFilterService.filterBelowAth(prefiltered);
             if (athFiltered.isEmpty()) return;
-            log.info("check tradeservice 3");
+            log.info("check tradeservice 3: athFilter");
 
             // 4. analysis
             List<CoinAnalysis> analyzed = athFiltered.stream()
                     .map(ticker -> algorithmService.analyzeCoin(ticker.getSymbol(), ticker.getLastPrice()) )
                     .toList();
             if (analyzed.isEmpty()) return;
-            log.info("check tradeservice 4");
+            log.info("check tradeservice 4: algorithm");
 
             List<CoinAnalysis> analyses = analyzed.stream()
                     .filter(c -> !c.getSymbol().isBlank()).toList();
