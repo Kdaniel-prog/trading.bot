@@ -70,7 +70,7 @@ public class TradeDecisionService {
             Duration openDuration = Duration.between(order.getStarted(), LocalDateTime.now());
 
             // After 40 minutes: close if profitable (any win > 0%)
-            if (openDuration.toMinutes() >= 30) {
+            if (openDuration.toMinutes() >= 40) {
                 if (pnl.getPnlPercent().compareTo(BigDecimal.valueOf(0.11)) > 0) {
                     return new TradeDecision(TradeAction.CLOSE, order,
                             String.format("TIME WIN triggered after %d minutes with %.2f%% profit",
@@ -78,10 +78,10 @@ public class TradeDecisionService {
                 }
             }
 
-            if (openDuration.toMinutes() >= 40) {
+            if (openDuration.toMinutes() >= 60) {
                 if (pnl.getPnlPercent().compareTo(BigDecimal.valueOf(0.0)) <= 0) {
                     return new TradeDecision(TradeAction.CLOSE, order,
-                            String.format("TIME WIN triggered after %d minutes with %.2f%% profit",
+                            String.format("TIME LOSE triggered after %d minutes with %.2f%% profit",
                                     openDuration.toMinutes(), pnl.getPnlPercent()));
                 }
             }
