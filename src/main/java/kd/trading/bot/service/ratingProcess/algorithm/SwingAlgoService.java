@@ -81,9 +81,9 @@ public class SwingAlgoService {
             // 🔹 Jelzés döntés
             Signal signal;
             if (score >= 4.5) {
-                signal = Signal.LONG;
-            } else if (score <= -5.0) {
                 signal = Signal.SHORT;
+            } else if (score <= -5.0) {
+                signal = Signal.LONG;
             } else {
                 signal = Signal.NO_TRADE;
             }

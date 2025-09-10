@@ -8,6 +8,7 @@ import kd.trading.bot.model.TradeDecision;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -17,6 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
@@ -55,12 +57,14 @@ public class TradeDecisionService {
     private TradeDecision evaluateOrder(OrderDto order, PnlResult pnl) {
         // Stop loss check
         if (pnl.getPnlPercent().compareTo(BigDecimal.valueOf(tradingConfig.stopLimit())) <= 0) {
+            log.info("STOP triggered at {}", pnl.getPnlPercent());
             return new TradeDecision(TradeAction.CLOSE, order,
                     String.format("STOP triggered at %.2f%%", pnl.getPnlPercent()));
         }
 
         // Take profit check
         if (pnl.getPnlPercent().compareTo(BigDecimal.valueOf(tradingConfig.winLimit())) >= 0) {
+            log.info("WIN triggered at {}", pnl.getPnlPercent());
             return new TradeDecision(TradeAction.CLOSE, order,
                     String.format("WIN triggered at %.2f%%", pnl.getPnlPercent()));
         }
@@ -68,7 +72,7 @@ public class TradeDecisionService {
         // Time-based checks
         if (order.getStarted() != null) {
             Duration openDuration = Duration.between(order.getStarted(), LocalDateTime.now());
-
+            log.warn("DURATION TIME: {} | SYMBOL: {}", openDuration, order.getSymbol());
             // After 40 minutes: close if profitable (any win > 0%)
             if (openDuration.toMinutes() >= 40) {
                 if (pnl.getPnlPercent().compareTo(BigDecimal.valueOf(0.11)) > 0) {
