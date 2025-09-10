@@ -66,7 +66,7 @@ public class TradeDecisionService {
         if (pnl.getPnlPercent().compareTo(BigDecimal.valueOf(tradingConfig.winLimit())) >= 0) {
             log.info("WIN triggered at {}", pnl.getPnlPercent());
             return new TradeDecision(TradeAction.CLOSE, order,
-                    String.format("WIN triggered at %.2f%%", pnl.getPnlPercent()));
+                    String.format("WIN triggered at %.2f%% | Symbol: %s", pnl.getPnlPercent(), order.getSymbol()));
         }
 
         // Time-based checks
@@ -77,16 +77,16 @@ public class TradeDecisionService {
             if (openDuration.toMinutes() >= 40) {
                 if (pnl.getPnlPercent().compareTo(BigDecimal.valueOf(0.11)) > 0) {
                     return new TradeDecision(TradeAction.CLOSE, order,
-                            String.format("TIME WIN triggered after %d minutes with %.2f%% profit",
-                                    openDuration.toMinutes(), pnl.getPnlPercent()));
+                            String.format("TIME WIN triggered after %d minutes with %.2f%% profit | Symbol: %s",
+                                    openDuration.toMinutes(), pnl.getPnlPercent(), order.getSymbol()));
                 }
             }
 
             if (openDuration.toMinutes() >= 90) {
                 if (pnl.getPnlPercent().compareTo(BigDecimal.valueOf(0.0)) <= 0) {
                     return new TradeDecision(TradeAction.CLOSE, order,
-                            String.format("TIME LOSE triggered after %d minutes with %.2f%% profit",
-                                    openDuration.toMinutes(), pnl.getPnlPercent()));
+                            String.format("TIME LOSE triggered after %d minutes with %.2f%% profit | Symbol: %s",
+                                    openDuration.toMinutes(), pnl.getPnlPercent(), order.getSymbol()));
                 }
             }
 
