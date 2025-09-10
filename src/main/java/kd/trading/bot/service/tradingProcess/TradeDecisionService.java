@@ -5,7 +5,9 @@ import kd.trading.bot.enums.TradeAction;
 import kd.trading.bot.model.OrderDto;
 import kd.trading.bot.model.PnlResult;
 import kd.trading.bot.model.TradeDecision;
-import kd.trading.bot.service.TradeService;
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
+import lombok.experimental.FieldDefaults;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -14,15 +16,13 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 @Service
+@RequiredArgsConstructor
+@FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 public class TradeDecisionService {
-    private final TradingConfig tradingConfig;
+    TradingConfig tradingConfig;
 
-    public TradeDecisionService(TradingConfig tradingConfig, TradeService tradeService) {
-        this.tradingConfig = tradingConfig;
-    }
 
     public List<TradeDecision> evaluateTradeDecisions(Map<OrderDto, PnlResult> tradeAnalytics) {
         List<TradeDecision> decisions = new ArrayList<>();
@@ -37,7 +37,8 @@ public class TradeDecisionService {
             }
         }
 
-        // Evaluate swipe condition
+        // Evaluate swipe condition - COMMENTED OUT FOR NOW
+        /*
         BigDecimal totalPnl = tradeAnalytics.values().stream()
                 .map(PnlResult::getPnlAbs)
                 .filter(Objects::nonNull)
@@ -46,6 +47,7 @@ public class TradeDecisionService {
         if (totalPnl.compareTo(BigDecimal.valueOf(tradingConfig.swipeValue())) >= 0) {
             decisions.add(new TradeDecision(TradeAction.SWIPE_ALL, null, "Total profit threshold reached"));
         }
+        */
 
         return decisions;
     }
@@ -68,23 +70,22 @@ public class TradeDecisionService {
             Duration openDuration = Duration.between(order.getStarted(), LocalDateTime.now());
 
             // After 40 minutes: close if profitable (any win > 0%)
-            if (openDuration.toMinutes() >= 40) {
-                if (pnl.getPnlPercent().compareTo(BigDecimal.ZERO) > 0) {
+            if (openDuration.toMinutes() >= 30) {
+                if (pnl.getPnlPercent().compareTo(BigDecimal.valueOf(0.11)) > 0) {
                     return new TradeDecision(TradeAction.CLOSE, order,
                             String.format("TIME WIN triggered after %d minutes with %.2f%% profit",
                                     openDuration.toMinutes(), pnl.getPnlPercent()));
                 }
             }
 
-            // After 10 minutes: close if very small movement (original logic)
-            if (openDuration.toMinutes() >= 10) {
-                BigDecimal absPercent = pnl.getPnlPercent().abs();
-                if (absPercent.doubleValue() < 0.11) {
+            if (openDuration.toMinutes() >= 40) {
+                if (pnl.getPnlPercent().compareTo(BigDecimal.valueOf(0.0)) <= 0) {
                     return new TradeDecision(TradeAction.CLOSE, order,
-                            String.format("TIMEOUT triggered after %d minutes with minimal movement (%.2f%%)",
+                            String.format("TIME WIN triggered after %d minutes with %.2f%% profit",
                                     openDuration.toMinutes(), pnl.getPnlPercent()));
                 }
             }
+
         }
 
         return new TradeDecision(TradeAction.HOLD, order, "No action required");

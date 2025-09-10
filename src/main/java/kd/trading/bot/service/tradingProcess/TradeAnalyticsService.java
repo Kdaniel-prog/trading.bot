@@ -1,30 +1,28 @@
 package kd.trading.bot.service.tradingProcess;
 
-import kd.trading.bot.enums.OrderSide;
 import kd.trading.bot.model.BinanceTickerData;
 import kd.trading.bot.model.OrderDto;
 import kd.trading.bot.model.PnlResult;
 import kd.trading.bot.model.TradeRisk;
-import org.springframework.stereotype.Component;
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
+import lombok.experimental.FieldDefaults;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 
 @Service
+@RequiredArgsConstructor
+@FieldDefaults(level = AccessLevel.PRIVATE)
 public class TradeAnalyticsService {
-    private final PnlCalculationService pnlCalculationService;
+    final PnlCalculationService pnlCalculationService;
 
     // In-memory cache - could be Redis in production
-    private Map<OrderDto, PnlResult> lastResults = new ConcurrentHashMap<>();
-
-    public TradeAnalyticsService(PnlCalculationService pnlCalculationService) {
-        this.pnlCalculationService = pnlCalculationService;
-    }
+    Map<OrderDto, PnlResult> lastResults = new ConcurrentHashMap<>();
 
     public Map<OrderDto, PnlResult> getCurrentTradeAnalytics() {
         return Collections.unmodifiableMap(lastResults);

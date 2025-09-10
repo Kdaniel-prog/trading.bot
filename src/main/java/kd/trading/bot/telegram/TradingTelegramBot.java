@@ -3,7 +3,6 @@ package kd.trading.bot.telegram;
 import kd.trading.bot.config.telegram.TelegramConfig;
 import kd.trading.bot.service.AccountProfitService;
 import kd.trading.bot.service.TelegramCommandService;
-import kd.trading.bot.service.TradeCheckingService;
 import kd.trading.bot.service.TelegramResponseService;
 import kd.trading.bot.service.tradingProcess.TradeAnalyticsService;
 import kd.trading.bot.telegram.eventType.TradeClosedUpdateEvent;
@@ -28,9 +27,7 @@ import java.util.List;
 @RequiredArgsConstructor
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 public class TradingTelegramBot extends TelegramLongPollingBot implements ApplicationListener<ApplicationEvent> {
-
     AccountProfitService accountProfitService;
-    TradeCheckingService tradeCheckingService;
     TelegramCommandService commandService;
     TelegramResponseService telegramResponseService;
     TradeAnalyticsService analyticsService;

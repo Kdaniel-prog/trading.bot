@@ -1,8 +1,5 @@
 package kd.trading.bot.service;
 
-import kd.trading.bot.config.trading.TradingConfig;
-import kd.trading.bot.enums.OrderSide;
-import kd.trading.bot.enums.TradeAction;
 import kd.trading.bot.model.*;
 import kd.trading.bot.service.tradingProcess.TradeAnalyticsService;
 import kd.trading.bot.service.tradingProcess.TradeDecisionService;
@@ -13,17 +10,8 @@ import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.time.Duration;
-import java.time.LocalDateTime;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicReference;
-
-import static kd.trading.bot.enums.TradeAction.SWIPE_ALL;
-import static kd.trading.bot.service.TradeService.BAD_SYMBOL_LIST;
 
 @Slf4j
 @Service
