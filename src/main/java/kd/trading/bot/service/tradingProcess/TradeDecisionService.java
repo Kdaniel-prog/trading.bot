@@ -78,7 +78,7 @@ public class TradeDecisionService {
                 }
             }
 
-            if (openDuration.toMinutes() >= 60) {
+            if (openDuration.toMinutes() >= 90) {
                 if (pnl.getPnlPercent().compareTo(BigDecimal.valueOf(0.0)) <= 0) {
                     return new TradeDecision(TradeAction.CLOSE, order,
                             String.format("TIME LOSE triggered after %d minutes with %.2f%% profit",
