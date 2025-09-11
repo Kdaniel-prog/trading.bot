@@ -6,7 +6,6 @@ import kd.trading.bot.model.BinanceTickerData;
 import kd.trading.bot.model.CoinAnalysis;
 import kd.trading.bot.model.OrderDto;
 import kd.trading.bot.model.SymbolInfo;
-import kd.trading.bot.service.ratingProcess.algorithm.EmaAlgoService;
 import kd.trading.bot.service.ratingProcess.algorithm.SwingAlgoService;
 import kd.trading.bot.service.ratingProcess.AthFilterService;
 import kd.trading.bot.service.ratingProcess.RankingService;
@@ -35,7 +34,6 @@ public class MarketDataPipelineService {
     final TradeService tradeService;
 
     final SwingAlgoService algorithmService;
-    final EmaAlgoService emaAlgoService;
 
     @Getter
     volatile RankingService.RankedCoins latestResult = new RankingService.RankedCoins(List.of(), List.of());

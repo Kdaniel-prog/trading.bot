@@ -6,12 +6,12 @@ import java.util.List;
 public class IndicatorUtil {
 
     // Simple Moving Average
-    public static double SMA(List<Double> closes) {
+    public double SMA(List<Double> closes) {
         return closes.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
     }
 
     // Exponential Moving Average
-    public static double EMA(List<Double> closes, int period) {
+    public double EMA(List<Double> closes, int period) {
         if (closes.isEmpty() || period <= 0) return 0.0;
 
         double k = 2.0 / (period + 1); // smoothing factor
@@ -26,7 +26,7 @@ public class IndicatorUtil {
     }
 
     // Wilder RSI (klasszikus verzió, TradingView-val egyező)
-    public static double RSI(List<Double> closes, int period) {
+    public double RSI(List<Double> closes, int period) {
         if (closes.size() < period + 1) return 50.0; // default középérték
 
         double gain = 0.0;
@@ -62,7 +62,7 @@ public class IndicatorUtil {
     }
 
     // MACD: [0] = MACD line, [1] = Signal line, [2] = Histogram
-    public static double[] MACD(List<Double> closes, int fastPeriod, int slowPeriod, int signalPeriod) {
+    public double[] MACD(List<Double> closes, int fastPeriod, int slowPeriod, int signalPeriod) {
         if (closes.size() < slowPeriod + signalPeriod) {
             return new double[] {0.0, 0.0, 0.0};
         }
@@ -84,5 +84,80 @@ public class IndicatorUtil {
         double histogram = macdLine - signalLine;
 
         return new double[] {macdLine, signalLine, histogram};
+    }
+
+    public double[] calculateSupportResistance(List<Double> highs, List<Double> lows, List<Double> closes) {
+        int lookback = Math.min(50, highs.size());
+        double currentPrice = closes.get(closes.size() - 1);
+
+        // Find recent significant levels
+        List<Double> recentHighs = highs.subList(highs.size() - lookback, highs.size());
+        List<Double> recentLows = lows.subList(lows.size() - lookback, lows.size());
+
+        // Find nearest support (highest low below current price)
+        double nearestSupport = recentLows.stream()
+                .filter(low -> low < currentPrice)
+                .mapToDouble(Double::doubleValue)
+                .max()
+                .orElse(currentPrice * 0.95);
+
+        // Find nearest resistance (lowest high above current price)
+        double nearestResistance = recentHighs.stream()
+                .filter(high -> high > currentPrice)
+                .mapToDouble(Double::doubleValue)
+                .min()
+                .orElse(currentPrice * 1.05);
+
+        return new double[]{nearestSupport, nearestResistance};
+    }
+
+    public double calculateATR(List<Double> highs, List<Double> lows, List<Double> closes, int period) {
+        if (highs.size() < period + 1) return 0.0;
+
+        double sum = 0.0;
+        for (int i = highs.size() - period; i < highs.size(); i++) {
+            double high = highs.get(i);
+            double low = lows.get(i);
+            double prevClose = i > 0 ? closes.get(i - 1) : closes.get(i);
+
+            double tr1 = high - low;
+            double tr2 = Math.abs(high - prevClose);
+            double tr3 = Math.abs(low - prevClose);
+
+            double trueRange = Math.max(tr1, Math.max(tr2, tr3));
+            sum += trueRange;
+        }
+
+        return sum / period;
+    }
+
+    public boolean isHigherHighsPattern(List<Double> highs, int lookback) {
+        if (highs.size() < lookback) return false;
+
+        List<Double> recentHighs = highs.subList(highs.size() - lookback, highs.size());
+        int higherHighsCount = 0;
+
+        for (int i = 1; i < recentHighs.size(); i++) {
+            if (recentHighs.get(i) > recentHighs.get(i - 1)) {
+                higherHighsCount++;
+            }
+        }
+
+        return higherHighsCount > lookback * 0.6; // 60% of recent candles showing higher highs
+    }
+
+    public boolean isLowerLowsPattern(List<Double> lows, int lookback) {
+        if (lows.size() < lookback) return false;
+
+        List<Double> recentLows = lows.subList(lows.size() - lookback, lows.size());
+        int lowerLowsCount = 0;
+
+        for (int i = 1; i < recentLows.size(); i++) {
+            if (recentLows.get(i) < recentLows.get(i - 1)) {
+                lowerLowsCount++;
+            }
+        }
+
+        return lowerLowsCount > lookback * 0.6; // 60% of recent candles showing lower lows
     }
 }

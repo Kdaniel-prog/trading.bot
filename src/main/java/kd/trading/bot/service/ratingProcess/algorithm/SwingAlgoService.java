@@ -16,77 +16,138 @@ import java.util.List;
 public class SwingAlgoService {
 
     private final BinanceRestClient restClient;
+    private final IndicatorUtil indicatorUtil;
 
     public CoinAnalysis analyzeCoin(String symbol, double lastPrice) {
         try {
-            // 1. Lekérjük a napi gyertyákat (kb. 200 napra vissza)
+            // Get 4H and daily data for better swing analysis
+            List<List<Object>> fourHourKlines = restClient.getKlines(symbol, "4h", 300);
             List<List<Object>> dailyKlines = restClient.getKlines(symbol, "1d", 200);
-            List<Double> closes = dailyKlines.stream()
-                    .map(k -> Double.parseDouble(k.get(4).toString()))
-                    .toList();
 
-            List<Double> volumes = dailyKlines.stream()
-                    .map(k -> Double.parseDouble(k.get(5).toString()))
-                    .toList();
-
-            if (closes.size() < 200) {
+            if (fourHourKlines.size() < 100 || dailyKlines.size() < 50) {
                 return new CoinAnalysis(symbol, 0.0, Signal.NO_TRADE, 0.0);
             }
 
-            double lastClose = closes.get(closes.size() - 1);
+            // Extract price data
+            List<Double> closes4h = fourHourKlines.stream()
+                    .map(k -> Double.parseDouble(k.get(4).toString()))
+                    .toList();
 
-            // 2. Trend filter: EMA50 vs EMA200
-            double ema50 = IndicatorUtil.EMA(closes, 50);
-            double ema200 = IndicatorUtil.EMA(closes, 200);
-            boolean bullTrend = ema50 > ema200 && lastClose > ema50;
-            boolean bearTrend = ema50 < ema200 && lastClose < ema50;
+            List<Double> highs4h = fourHourKlines.stream()
+                    .map(k -> Double.parseDouble(k.get(2).toString()))
+                    .toList();
 
-            // 3. Volume filter: mai volumen vs 20 napos átlag
-            double avgVol20 = volumes.subList(volumes.size() - 20, volumes.size())
+            List<Double> lows4h = fourHourKlines.stream()
+                    .map(k -> Double.parseDouble(k.get(3).toString()))
+                    .toList();
+
+            List<Double> volumes4h = fourHourKlines.stream()
+                    .map(k -> Double.parseDouble(k.get(5).toString()))
+                    .toList();
+
+            List<Double> closesDaily = dailyKlines.stream()
+                    .map(k -> Double.parseDouble(k.get(4).toString()))
+                    .toList();
+
+            double currentPrice = closes4h.get(closes4h.size() - 1);
+
+            // === PRIMARY TREND ANALYSIS ===
+            double ema20_4h = indicatorUtil.EMA(closes4h, 20);
+            double ema50_4h = indicatorUtil.EMA(closes4h, 50);
+            double ema200_daily = indicatorUtil.EMA(closesDaily, 200);
+
+            boolean primaryUptrend = currentPrice > ema200_daily && ema20_4h > ema50_4h;
+            boolean primaryDowntrend = currentPrice < ema200_daily && ema20_4h < ema50_4h;
+
+            // === MOMENTUM ANALYSIS ===
+            double rsi4h = indicatorUtil.RSI(closes4h, 14);
+            double[] macd4h = indicatorUtil.MACD(closes4h, 12, 26, 9);
+            double macdLine = macd4h[0];
+            double macdSignal = macd4h[1];
+            double macdHist = macd4h[2];
+
+            // MACD momentum conditions
+            boolean macdBullish = macdLine > macdSignal && macdHist > 0;
+            boolean macdBearish = macdLine < macdSignal && macdHist < 0;
+
+            // RSI conditions for entry
+            boolean rsiBullishEntry = rsi4h > 45 && rsi4h < 65; // Not oversold/overbought
+            boolean rsiBearishEntry = rsi4h > 35 && rsi4h < 55;
+
+            // === VOLUME ANALYSIS ===
+            double avgVolume20 = volumes4h.subList(volumes4h.size() - 20, volumes4h.size())
                     .stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
-            double lastVol = volumes.get(volumes.size() - 1);
-            boolean strongVolume = lastVol > 1.5 * avgVol20;
+            double currentVolume = volumes4h.get(volumes4h.size() - 1);
+            boolean strongVolume = currentVolume > 1.3 * avgVolume20;
 
-            // 4. MACD filter
-            double[] macd = IndicatorUtil.MACD(closes, 12, 26, 9);
-            double macdValue = macd[0];
-            double macdSignal = macd[1];
-            boolean macdBull = macdValue > macdSignal && macdValue > 0;
-            boolean macdBear = macdValue < macdSignal && macdValue < 0;
+            // === SUPPORT/RESISTANCE LEVELS ===
+            double[] srLevels = indicatorUtil.calculateSupportResistance(highs4h, lows4h, closes4h);
+            double nearestSupport = srLevels[0];
+            double nearestResistance = srLevels[1];
 
-            // 5. RSI
-            double rsi = IndicatorUtil.RSI(closes, 14);
+            // Distance from S/R levels (risk management)
+            double distanceFromSupport = (currentPrice - nearestSupport) / currentPrice * 100;
+            double distanceFromResistance = (nearestResistance - currentPrice) / currentPrice * 100;
 
-            // 6. ATH (All Time High)
-            double ath = closes.stream().mapToDouble(Double::doubleValue).max().orElse(lastClose);
-            double distanceFromAthPct = (ath - lastClose) / ath * 100;
+            // === VOLATILITY FILTER ===
+            double atr = indicatorUtil.calculateATR(highs4h, lows4h, closes4h, 14);
+            double volatilityPct = (atr / currentPrice) * 100;
+            boolean goodVolatility = volatilityPct > 2.0 && volatilityPct < 8.0; // 2-8% volatility
 
-            // Score számítás
+            // === MARKET STRUCTURE ===
+            boolean higherHighs = indicatorUtil.isHigherHighsPattern(highs4h, 10);
+            boolean lowerLows = indicatorUtil.isLowerLowsPattern(lows4h, 10);
+
+            // === SCORING SYSTEM ===
             double score = 0.0;
 
-            if (bullTrend) score += 3.0;
-            if (bearTrend) score -= 3.0;
+            // Primary trend (most important)
+            if (primaryUptrend) score += 4.0;
+            if (primaryDowntrend) score -= 4.0;
 
+            // Momentum alignment
+            if (macdBullish && rsiBullishEntry) score += 3.0;
+            if (macdBearish && rsiBearishEntry) score -= 3.0;
+
+            // Market structure
+            if (higherHighs) score += 2.0;
+            if (lowerLows) score -= 2.0;
+
+            // Volume confirmation
             if (strongVolume) score += 1.5;
 
-            if (macdBull) score += 2.0;
-            if (macdBear) score -= 2.0;
+            // Volatility filter
+            if (goodVolatility) score += 1.0;
+            else score -= 2.0; // Penalize low/extreme volatility
 
-            if (distanceFromAthPct < 10) score -= 2.0; // túl közel ATH-hoz
-            else score += 1.0;
+            // Risk/Reward based on S/R levels
+            if (distanceFromSupport > 2.0 && distanceFromSupport < 8.0) score += 1.5; // Good distance from support
+            if (distanceFromResistance > 3.0) score += 1.0; // Room to move up
+            if (distanceFromResistance < 1.5) score -= 2.0; // Too close to resistance
 
-            if (rsi < 30) score += 2.0;
-            else if (rsi > 70) score -= 2.0;
+            // Additional filters to reduce false signals
+            if (rsi4h > 75 || rsi4h < 25) score -= 3.0; // Avoid extreme RSI
 
-            // 🔹 Jelzés döntés
-            Signal signal;
-            if (score >= 4.5) {
-                signal = Signal.SHORT;
-            } else if (score <= -5.0) {
+            // Trend consistency check
+            double ema10_4h = indicatorUtil.EMA(closes4h, 10);
+            if (primaryUptrend && ema10_4h > ema20_4h && ema20_4h > ema50_4h) score += 1.5;
+            if (primaryDowntrend && ema10_4h < ema20_4h && ema20_4h < ema50_4h) score -= 1.5;
+
+            // === SIGNAL DECISION WITH FLEXIBLE CRITERIA ===
+            Signal signal = Signal.NO_TRADE;
+
+            // LONG signals - High confidence setups
+            if (score >= 7.0 && primaryUptrend && macdBullish && strongVolume && goodVolatility) {
                 signal = Signal.LONG;
-            } else {
-                signal = Signal.NO_TRADE;
             }
+            // SHORT signals - You can adjust this threshold to get more/fewer SHORT signals
+            else if (score <= -6.0 && primaryDowntrend && macdBearish && goodVolatility) {
+                signal = Signal.SHORT;
+            }
+            // NO_TRADE for everything else (most cases will be NO_TRADE for safety)
+
+            log.debug("Analysis for {}: Score={}, RSI={}, MACD={}, Volume={}, ATR%={}",
+                    symbol, score, rsi4h, macdLine, currentVolume/avgVolume20, volatilityPct);
 
             return new CoinAnalysis(symbol, score, signal, lastPrice);
 

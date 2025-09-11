@@ -161,7 +161,7 @@ public class TradeService {
         }
     }
 
-    @Scheduled(fixedRate = 5 * 60 * 1000)
+    @Scheduled(fixedRate = 3 * 60 * 1000)
     public void checkOpenOrdes() {
         orderDtoList.removeIf(orderDto -> {
             if (orderDto.getStarted() != null) {

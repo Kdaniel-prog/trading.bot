@@ -9,8 +9,8 @@ binance:
   secretKey: aa5dc12959b2c0205a07f50618fdbe56b7021a68ffe958623338290851138128
 
 trading:
-  stopLimit: -2.5 # 4%
-  winLimit: 5.00 # 7 %
+  stopLimit: -0.60 # 4%
+  winLimit: 1.2 # 3 %
 
   moneyUsdt: 50
   maxTrade: 5
