@@ -60,7 +60,7 @@ public class AccountProfitService {
                     OrderDto dto = OrderMapper.fromBinanceOrder(order);
                     dto.setStarted(LocalDateTime.now());
                     TradeService.orderDtoList.add(dto);
-                    log.info("➕ Open order added: {} ({})", symbol, orderId);
+                    log.info("➕ Open order added: {} ({}) at price: {}", symbol, orderId, order.p);
                 } else {
                     log.debug("⚠️ Duplicate NEW order ignored: {} ({})", symbol, orderId);
                 }
@@ -69,18 +69,45 @@ public class AccountProfitService {
                         .filter(o -> o.getClientOrderId().equals(clientOrderId))
                         .findFirst()
                         .ifPresent(o -> {
-                            o.setExecutedQty(BigDecimal.valueOf(Double.parseDouble(order.z)));
+                            // Update with actual execution data
+                            o.setExecutedQty(BigDecimal.valueOf(Double.parseDouble(order.z))); // cumulative filled quantity
                             o.setCumQty(BigDecimal.valueOf(Double.parseDouble(order.z)));
-                            o.setAvgPrice(BigDecimal.valueOf(Double.parseDouble(order.ap)));
+
+                            // CRITICAL: Update with actual fill price (average price)
+                            BigDecimal actualFillPrice = getActualFillPrice(order);
+                            o.setAvgPrice(actualFillPrice);
+                            o.setPrice(actualFillPrice); // Update original price too
+
+                            log.info("✏️ Open order updated (partial fill): {} ({}) - Filled at: {}",
+                                    symbol, orderId, actualFillPrice);
                         });
-                log.info("✏️ Open order updated (partial fill): {} ({})", symbol, orderId);
             } else if ("FILLED".equals(status)) {
+                // Remove from pending orders
                 TradeService.orderDtoList.removeIf(o -> o.getClientOrderId().equals(clientOrderId));
                 log.info("❌ Open order removed: {} ({})", symbol, orderId);
 
-                OrderDto myOrder = OrderMapper.fromBinanceOrder(order);
-                tradeService.moveOrderToActive(myOrder);
-                log.info("✅ LIMIT order moved to active trades: {} ({})", symbol, orderId);
+                // Create active trade with CORRECT entry price
+                OrderDto activeOrder = OrderMapper.fromBinanceOrder(order);
+
+                // CRITICAL: Set the correct entry price from the filled order
+                BigDecimal actualEntryPrice = getActualFillPrice(order);
+                activeOrder.setPrice(actualEntryPrice);     // Entry price
+                activeOrder.setAvgPrice(actualEntryPrice);  // Average price
+                activeOrder.setExecutedQty(BigDecimal.valueOf(Double.parseDouble(order.z))); // Filled quantity
+                activeOrder.setCumQty(BigDecimal.valueOf(Double.parseDouble(order.z)));
+                activeOrder.setStarted(LocalDateTime.now()); // Mark when position started
+
+                tradeService.moveOrderToActive(activeOrder);
+
+                log.info("✅ LIMIT order moved to active trades: {} ({}) - Entry price: {}",
+                        symbol, orderId, actualEntryPrice);
+
+                // Notify about new position opening
+                tradeClosedUpdated(
+                        String.format("🚀 LIMIT order filled - New position opened:\n%s\nEntry Price: %s",
+                                formatTradeDetails(order),
+                                actualEntryPrice.stripTrailingZeros().toPlainString()));
+
             } else if ("CANCELED".equals(status)) {
                 TradeService.orderDtoList.removeIf(o -> o.getClientOrderId().equals(clientOrderId));
                 log.info("❌ Open order canceled: {} ({})", symbol, orderId);
@@ -115,17 +142,23 @@ public class AccountProfitService {
                                 if(o.getIsLoaded()) {
                                     return false;
                                 } else {
-                                   return o.getClientOrderId().equals(clientOrderId);
+                                    return o.getClientOrderId().equals(clientOrderId);
                                 }
                             });
 
                     if (!exists) {
                         OrderDto myOrder = OrderMapper.fromBinanceOrder(order);
+
+                        // For MARKET orders, also ensure correct entry price
+                        BigDecimal marketEntryPrice = getActualFillPrice(order);
+                        myOrder.setPrice(marketEntryPrice);
+                        myOrder.setAvgPrice(marketEntryPrice);
+
                         tradeService.moveOrderToActive(myOrder);
-                        log.info("🚀 New trade opened: {} ({})", symbol, orderId);
-                        // új pozíció
+                        log.info("🚀 New MARKET trade opened: {} ({}) - Entry: {}", symbol, orderId, marketEntryPrice);
+
                         tradeClosedUpdated(
-                                String.format("🚀 New trade opened:\n%s",
+                                String.format("🚀 New MARKET trade opened:\n%s",
                                         formatTradeDetails(order)));
                     } else {
                         log.debug("⚠️ Duplicate MARKET update ignored: {} ({})", symbol, orderId);
@@ -133,10 +166,32 @@ public class AccountProfitService {
                 }
             }
         }
-
     }
 
+    /**
+     * Gets the actual fill price from the order update
+     * Priority: Last filled price (L) > Average price (ap) > Order price (p)
+     */
+    private BigDecimal getActualFillPrice(OrderTradeUpdateDto.Order order) {
+        // Last filled price (most accurate for the current fill)
+        if (order.L != null && !order.L.isEmpty() && !order.L.equals("0")) {
+            return new BigDecimal(order.L);
+        }
 
+        // Average price (weighted average of all fills)
+        if (order.ap != null && !order.ap.isEmpty() && !order.ap.equals("0")) {
+            return new BigDecimal(order.ap);
+        }
+
+        // Fallback to original order price
+        if (order.p != null && !order.p.isEmpty() && !order.p.equals("0")) {
+            return new BigDecimal(order.p);
+        }
+
+        // This should not happen, but return 0 as fallback
+        log.warn("⚠️ Could not determine fill price for order: {}", order);
+        return BigDecimal.ZERO;
+    }
 
     private double parseProfit(String rp) {
         return (rp != null && !rp.isEmpty()) ? Double.parseDouble(rp) : 0.0;
@@ -205,13 +260,8 @@ public class AccountProfitService {
         String symbol = order.s;
         BigDecimal qty = toBigDecimal(order.q);
 
-        // Nyitásnál entry ár = átlagár (ap), ha nincs, akkor a megadott ár (p)
-        BigDecimal entryPrice = toBigDecimal(order.ap);
-        if (entryPrice.compareTo(BigDecimal.ZERO) == 0) {
-            entryPrice = toBigDecimal(order.p);
-        }
-
-        // Zárásnál (TRADE) → last fill price (L) vagy ap
+        // Use the actual fill price method for consistency
+        BigDecimal entryPrice = getActualFillPrice(order);
         BigDecimal closePrice = toBigDecimal(order.L);
         if (closePrice.compareTo(BigDecimal.ZERO) == 0) {
             closePrice = entryPrice;
