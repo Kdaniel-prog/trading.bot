@@ -1,4 +1,4 @@
-name: Deploy to Hetzner
+name: Deploy to Hetzner Self-Hosted Runner
 
 on:
   push:
@@ -7,27 +7,19 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Deploy over SSH
-        uses: appleboy/ssh-action@v0.1.10
-        with:
-          host: ${{ secrets.SERVER_IP }}
-          username: root
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          script: |
-            if [ ! -d /opt/myapp ]; then
-              git clone git@github.com:Kdaniel-prog/trading.bot.git /opt/myapp
-            fi
-            cd /opt/myapp
-            git pull
-            docker stop springapp_container || true
-            docker rm springapp_container || true
-            docker build -t springapp .
-            docker run -d -p 8080:8080 --name springapp_container springapp
-            echo "==== Last 20 log lines from app ===="
-            docker logs --tail 20 springapp_container
-            echo "🚀 Deploy successful!"
+      - name: Build and run Docker container
+        run: |
+          cd /opt/myapp || git clone git@github.com:Kdaniel-prog/trading.bot.git /opt/myapp && cd /opt/myapp
+          git pull
+          docker stop springapp_container || true
+          docker rm springapp_container || true
+          docker build -t springapp .
+          docker run -d -p 8080:8080 --name springapp_container springapp
+          echo "==== Last 20 log lines from app ===="
+          docker logs --tail 20 springapp_container
+          echo "🚀 Deploy successful!"
