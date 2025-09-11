@@ -40,4 +40,5 @@ public class OrderDto {
     private Long updateTime;           // utolsó frissítés időbélyeg
     private LocalDateTime started;
     private Boolean isLoaded = false;
+    private BigDecimal lastWin = BigDecimal.valueOf(0.0);
 }
