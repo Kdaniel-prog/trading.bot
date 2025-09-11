@@ -45,7 +45,7 @@ public class TradeDecisionService {
         BigDecimal currentPnlPercent = pnl.getPnlPercent();
         Duration openDuration = getOrderDuration(order);
 
-        log.debug("Evaluating {} | PnL: {}%, Duration: {} min, LastWin: {}%",
+        log.debug("Evaluating {} || PnL: {}%, Duration: {} min, LastWin: {}%",
                 order.getSymbol(), currentPnlPercent, openDuration.toMinutes(), order.getLastWin());
 
         // === IMMEDIATE EXITS ===
