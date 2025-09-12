@@ -1,5 +1,6 @@
 package kd.trading.bot.service.tradingProcess;
 
+import jakarta.annotation.PostConstruct;
 import kd.trading.bot.config.trading.TradingConfig;
 import kd.trading.bot.enums.TradeAction;
 import kd.trading.bot.model.OrderDto;
@@ -22,35 +23,34 @@ import java.util.Map;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
+@FieldDefaults(level = AccessLevel.PRIVATE)
 public class TradeDecisionService {
-    TradingConfig tradingConfig;
+    final TradingConfig tradingConfig;
 
     // === CALCULATION DIVISORS ===
-    private static final BigDecimal DIVIDE_BY_TWO = BigDecimal.valueOf(2);
-    private static final BigDecimal DIVIDE_BY_THREE = BigDecimal.valueOf(3);
-    private static final BigDecimal DIVIDE_BY_FOUR = BigDecimal.valueOf(4);
-    private static final BigDecimal DIVIDE_BY_FIVE = BigDecimal.valueOf(5);
-    private static final BigDecimal DIVIDE_BY_THREE_POINT_THREE = BigDecimal.valueOf(3.33);
+    static final BigDecimal DIVIDE_BY_TWO = BigDecimal.valueOf(2);
+    static final BigDecimal DIVIDE_BY_THREE = BigDecimal.valueOf(3);
+    static final BigDecimal DIVIDE_BY_FOUR = BigDecimal.valueOf(4);
+    static final BigDecimal DIVIDE_BY_FIVE = BigDecimal.valueOf(5);
+    static final BigDecimal DIVIDE_BY_THREE_POINT_THREE = BigDecimal.valueOf(3.33);
 
     // === CONFIG-BASED THRESHOLDS ===
-    private final BigDecimal winOneThird;
-    private final BigDecimal loseOneThird;
+    BigDecimal winOneThird;
+    BigDecimal loseOneThird;
 
     // === SPECIFIC TRADING THRESHOLDS ===
-    private static final BigDecimal DECLINE_SMALL_THRESHOLD = BigDecimal.valueOf(0.3);
-    private static final BigDecimal DECLINE_MIN_THRESHOLD = BigDecimal.valueOf(0.5);
-    private static final int PROFIT_DECLINE_CHECK_MINUTES = 40;
-    private static final int EARLY_LOSS_CHECK_MINUTES = 30;
-    private static final int SIDEWAYS_CHECK_MINUTES = 90;
-    private static final int TIME_EXIT_2H = 2;
-    private static final int TIME_EXIT_3H = 3;
-    private static final int TIME_EXIT_4H = 4;
-    private static final int FORCE_EXIT_6H = 6;
+    static final BigDecimal DECLINE_SMALL_THRESHOLD = BigDecimal.valueOf(0.3);
+    static final BigDecimal DECLINE_MIN_THRESHOLD = BigDecimal.valueOf(0.5);
+    static final int PROFIT_DECLINE_CHECK_MINUTES = 40;
+    static final int EARLY_LOSS_CHECK_MINUTES = 30;
+    static final int SIDEWAYS_CHECK_MINUTES = 90;
+    static final int TIME_EXIT_2H = 2;
+    static final int TIME_EXIT_3H = 3;
+    static final int TIME_EXIT_4H = 4;
+    static final int FORCE_EXIT_6H = 6;
 
-    // Constructor to initialize config-based values
-    public TradeDecisionService(TradingConfig tradingConfig) {
-        this.tradingConfig = tradingConfig;
+    @PostConstruct
+    void init() {
         this.winOneThird = BigDecimal.valueOf(tradingConfig.winLimit()).divide(DIVIDE_BY_THREE, 4, RoundingMode.HALF_UP);
         this.loseOneThird = BigDecimal.valueOf(Math.abs(tradingConfig.stopLimit())).divide(DIVIDE_BY_THREE, 4, RoundingMode.HALF_UP);
     }
