@@ -37,10 +37,8 @@ public class TradeAnalyticsService {
         activeOrders.forEach(order -> log.debug("Active order: {}", order.getSymbol()));
 
         Map<OrderDto, PnlResult> newResults = pnlCalculationService.calculateBatchPnl(activeOrders, tickers);
-        log.info("PnL calculation returned {} results", newResults.size());
 
         updateLastResult(newResults, activeOrders);
-        log.info("Trade analytics updated - cache now contains {} trades", lastResults.size());
     }
 
     private void updateLastResult(Map<OrderDto, PnlResult> results, List<OrderDto> activeOrders) {

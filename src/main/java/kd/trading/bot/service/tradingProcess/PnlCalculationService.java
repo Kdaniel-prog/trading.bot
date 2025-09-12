@@ -29,7 +29,6 @@ public class PnlCalculationService {
                                 return calculatePnl(order, ticker);
                             } else {
                                 // No ticker data - show with 0% PnL using entry price
-                                log.warn("No ticker data for {}, showing with entry price", order.getSymbol());
                                 return createZeroPnlResult(order);
                             }
                         }
