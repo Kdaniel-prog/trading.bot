@@ -22,7 +22,7 @@ public class TradeAnalyticsService {
     final PnlCalculationService pnlCalculationService;
 
     // In-memory cache - could be Redis in production
-    Map<OrderDto, PnlResult> lastResults = new ConcurrentHashMap<>();
+    final Map<OrderDto, PnlResult> lastResults = new ConcurrentHashMap<>();
 
     public Map<OrderDto, PnlResult> getCurrentTradeAnalytics() {
         return Collections.unmodifiableMap(lastResults);
@@ -34,12 +34,13 @@ public class TradeAnalyticsService {
     }
 
     private void updateLastResult(Map<OrderDto, PnlResult> results, List<OrderDto> activeOrders) {
-        if (!lastResults.isEmpty()) {
-            lastResults.putAll(results);
-            lastResults.keySet().removeIf(order -> !activeOrders.contains(order));
-        } else {
-            lastResults = new ConcurrentHashMap<>(results);
-        }
+        // Clear old results and add new ones
+        lastResults.clear();
+        lastResults.putAll(results);
+
+        // Alternative approach: Update existing and remove stale entries
+        // lastResults.putAll(results);
+        // lastResults.keySet().removeIf(order -> !activeOrders.contains(order));
     }
 
     public BigDecimal getTotalPnl() {
