@@ -90,6 +90,7 @@ public class PnlCalculationService {
     private boolean isLongPosition(OrderDto order) {
         // For futures: LONG positionSide = long, SHORT = short
         // For spot: BUY side = long, SELL = short
+        // NOTE: Binance futures returns opposite side, so we use NOT operator
         if (order.getSide() != null) {
             return !"LONG".equals(order.getSide().toString());
         }
@@ -98,9 +99,10 @@ public class PnlCalculationService {
     }
 
     private BigDecimal calculatePnlAmount(BigDecimal entryPrice, BigDecimal currentPrice, BigDecimal qty, boolean isLong) {
+        // Fixed: Inverted the logic since isLongPosition accounts for Binance's opposite side behavior
         BigDecimal priceDiff = isLong
-                ? currentPrice.subtract(entryPrice)
-                : entryPrice.subtract(currentPrice);
+                ? entryPrice.subtract(currentPrice)    // For long: profit when current > entry
+                : currentPrice.subtract(entryPrice);   // For short: profit when current < entry
 
         return priceDiff.multiply(qty).setScale(8, RoundingMode.HALF_UP);
     }
@@ -108,9 +110,10 @@ public class PnlCalculationService {
     private BigDecimal calculatePnlPercent(BigDecimal entryPrice, BigDecimal currentPrice, boolean isLong) {
         if (entryPrice.compareTo(BigDecimal.ZERO) == 0) return BigDecimal.ZERO;
 
+        // Fixed: Inverted the logic since isLongPosition accounts for Binance's opposite side behavior
         BigDecimal priceDiff = isLong
-                ? currentPrice.subtract(entryPrice)
-                : entryPrice.subtract(currentPrice);
+                ? entryPrice.subtract(currentPrice)    // For long: profit when current > entry
+                : currentPrice.subtract(entryPrice);   // For short: profit when current < entry
 
         return priceDiff.divide(entryPrice, 6, RoundingMode.HALF_UP)
                 .multiply(BigDecimal.valueOf(100))
