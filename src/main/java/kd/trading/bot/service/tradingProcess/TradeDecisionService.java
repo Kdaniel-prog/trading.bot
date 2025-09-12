@@ -12,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -24,6 +25,31 @@ import java.util.Map;
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 public class TradeDecisionService {
     TradingConfig tradingConfig;
+
+    private static final BigDecimal DIVIDE_BY_TWO = BigDecimal.valueOf(2);
+    private static final BigDecimal DIVIDE_BY_THREE = BigDecimal.valueOf(3);
+    private static final BigDecimal DIVIDE_BY_FOUR = BigDecimal.valueOf(4);
+    private static final BigDecimal DIVIDE_BY_FIVE = BigDecimal.valueOf(5);
+    private static final BigDecimal DIDIVIDE_BY_THREE_POINT_THREE = BigDecimal.valueOf(3.33);
+
+    // === FRACTIONAL CONSTANTS FOR CALCULATIONS ===
+    private static final BigDecimal HALF = BigDecimal.valueOf(2);  // 1/2
+    private static final BigDecimal ONE_THIRD = BigDecimal.valueOf(3);  // 1/3
+    private static final BigDecimal TWO_THIRDS = BigDecimal.valueOf(1.5);  // 2/3
+    private static final BigDecimal ONE_QUARTER = BigDecimal.valueOf(4);  // 1/4
+    private static final BigDecimal ONE_FIFTH = BigDecimal.valueOf(5);  // 1/5
+    private static final BigDecimal THREE_POINT_THREE_THREE = BigDecimal.valueOf(3.33);  // 3.33 for ~30%
+
+    // === SPECIFIC TRADING THRESHOLDS (not from config) ===
+    private static final BigDecimal DECLINE_SMALL_THRESHOLD = BigDecimal.valueOf(0.3);
+    private static final BigDecimal DECLINE_MIN_THRESHOLD = BigDecimal.valueOf(0.5);
+    private static final int PROFIT_DECLINE_CHECK_MINUTES = 40;
+    private static final int EARLY_LOSS_CHECK_MINUTES = 30;
+    private static final int SIDEWAYS_CHECK_MINUTES = 90;
+    private static final int TIME_EXIT_2H = 2;
+    private static final int TIME_EXIT_3H = 3;
+    private static final int TIME_EXIT_4H = 4;
+    private static final int FORCE_EXIT_6H = 6;
 
     public List<TradeDecision> evaluateTradeDecisions(Map<OrderDto, PnlResult> tradeAnalytics) {
         List<TradeDecision> decisions = new ArrayList<>();
@@ -80,14 +106,17 @@ public class TradeDecisionService {
      */
     private TradeDecision evaluateProfitDeclineAt40Min(OrderDto order, BigDecimal currentPnl, Duration openDuration) {
         long minutes = openDuration.toMinutes();
-        BigDecimal forceExitThreshold = BigDecimal.valueOf(Math.abs(tradingConfig.stopLimit()) / 2.0); // 30% of stop limit for force exit
+
+        // stopLimit / 2 = 50% of stop limit for force exit
+        BigDecimal forceExitThreshold = getStopLimitValue().divide(HALF, 4, RoundingMode.HALF_UP);
         BigDecimal zeroThreshold = BigDecimal.ZERO;
-        BigDecimal minDeclineThreshold = BigDecimal.valueOf(0.5);
-        BigDecimal smallProfitThreshold = BigDecimal.valueOf(tradingConfig.winLimit() / 10.0); // 10% of win limit
-        BigDecimal smallDeclineThreshold = BigDecimal.valueOf(0.3);
+        BigDecimal minDeclineThreshold = DECLINE_MIN_THRESHOLD;
+        // winLimit / 3 = 33% of win limit for small profit threshold
+        BigDecimal smallProfitThreshold = getWinLimitValue().divide(ONE_THIRD, 4, RoundingMode.HALF_UP);
+        BigDecimal smallDeclineThreshold = DECLINE_SMALL_THRESHOLD;
 
         // Only check after 40 minutes
-        if (minutes < 40) {
+        if (minutes < PROFIT_DECLINE_CHECK_MINUTES) {
             return createDecision(TradeAction.HOLD, order, "Not yet 40 minutes");
         }
 
@@ -123,7 +152,8 @@ public class TradeDecisionService {
      */
     private TradeDecision evaluateTrailingStop(OrderDto order, BigDecimal currentPnl) {
         BigDecimal lastWin = order.getLastWin() != null ? order.getLastWin() : BigDecimal.ZERO;
-        BigDecimal trailingThreshold = BigDecimal.valueOf(tradingConfig.winLimit() / 20.0); // 1/20 of win limit for trailing
+        // winLimit / 4 = 25% of win limit for trailing threshold
+        BigDecimal trailingThreshold = getWinLimitValue().divide(ONE_QUARTER, 4, RoundingMode.HALF_UP);
 
         // Update lastWin if current profit is higher
         if (currentPnl.compareTo(lastWin) > 0) {
@@ -150,16 +180,15 @@ public class TradeDecisionService {
      */
     private TradeDecision evaluateTimeBasedExit(OrderDto order, BigDecimal currentPnl, Duration openDuration) {
         long hours = openDuration.toHours();
-        long minutes = openDuration.toMinutes();
 
         // Calculate proportional thresholds from config
-        BigDecimal twoHourThreshold = BigDecimal.valueOf(tradingConfig.winLimit() / 2.0); // 1/2 of win limit for 2h exit
-        BigDecimal threeHourThreshold = BigDecimal.valueOf(tradingConfig.winLimit() / 3.0); // 1/3 of win limit for 3h exit
-        BigDecimal fourHourThreshold = BigDecimal.valueOf(tradingConfig.winLimit() / 5.0); // 1/5 of win limit for 4h exit
-        BigDecimal forceExitThreshold = BigDecimal.valueOf(-Math.abs(tradingConfig.stopLimit()) / 3.33); // 30% of stop limit for force exit
+        BigDecimal twoHourThreshold = getWinLimitValue().divide(HALF, 4, RoundingMode.HALF_UP); // winLimit / 2
+        BigDecimal threeHourThreshold = getWinLimitValue().divide(ONE_THIRD, 4, RoundingMode.HALF_UP); // winLimit / 3
+        BigDecimal fourHourThreshold = getWinLimitValue().divide(ONE_FIFTH, 4, RoundingMode.HALF_UP); // winLimit / 5
+        BigDecimal forceExitThreshold = getStopLimitValue().abs().divide(THREE_POINT_THREE_THREE, 4, RoundingMode.HALF_UP); // ~30% of stop limit
 
         // After 2 hours: Take profit above proportional threshold
-        if (hours >= 2 && currentPnl.compareTo(twoHourThreshold) >= 0) {
+        if (hours >= TIME_EXIT_2H && currentPnl.compareTo(twoHourThreshold) >= 0) {
             log.info("⏰ TIME EXIT (2h+): Taking {}% profit for {} (threshold: {}%)",
                     currentPnl, order.getSymbol(), twoHourThreshold);
             return createDecision(TradeAction.CLOSE, order,
@@ -167,7 +196,7 @@ public class TradeDecisionService {
         }
 
         // After 3 hours: Take profit above smaller threshold
-        if (hours >= 3 && currentPnl.compareTo(threeHourThreshold) >= 0) {
+        if (hours >= TIME_EXIT_3H && currentPnl.compareTo(threeHourThreshold) >= 0) {
             log.info("⏰ TIME EXIT (3h+): Taking {}% profit for {} (threshold: {}%)",
                     currentPnl, order.getSymbol(), threeHourThreshold);
             return createDecision(TradeAction.CLOSE, order,
@@ -175,7 +204,7 @@ public class TradeDecisionService {
         }
 
         // After 4 hours: Close if above minimal threshold
-        if (hours >= 4 && currentPnl.compareTo(fourHourThreshold) >= 0) {
+        if (hours >= TIME_EXIT_4H && currentPnl.compareTo(fourHourThreshold) >= 0) {
             log.info("⏰ TIME EXIT (4h+): Taking {}% profit for {} (threshold: {}%)",
                     currentPnl, order.getSymbol(), fourHourThreshold);
             return createDecision(TradeAction.CLOSE, order,
@@ -183,9 +212,9 @@ public class TradeDecisionService {
         }
 
         // After 6 hours: Force close if not too negative (proportional to stop limit)
-        if (hours >= 6 && currentPnl.compareTo(forceExitThreshold) >= 0) {
+        if (hours >= FORCE_EXIT_6H && currentPnl.compareTo(forceExitThreshold.negate()) >= 0) {
             log.info("⏰ FORCE TIME EXIT (6h+): Closing at {}% for {} (threshold: {}%)",
-                    currentPnl, order.getSymbol(), forceExitThreshold);
+                    currentPnl, order.getSymbol(), forceExitThreshold.negate());
             return createDecision(TradeAction.CLOSE, order,
                     String.format("FORCE TIME EXIT (6h): %.2f%%", currentPnl));
         }
@@ -197,20 +226,19 @@ public class TradeDecisionService {
      * Progressive risk reduction based on time and performance with tighter controls
      */
     private TradeDecision evaluateRiskReduction(OrderDto order, BigDecimal currentPnl, Duration openDuration) {
-        long hours = openDuration.toHours();
         long minutes = openDuration.toMinutes();
 
         // Calculate tighter thresholds based on config values
-        BigDecimal adjustedWinLimit = BigDecimal.valueOf(tradingConfig.winLimit() / 5.0);
-        BigDecimal adjustedStopLimit = BigDecimal.valueOf(Math.abs(tradingConfig.stopLimit() / 5.0));
+        BigDecimal adjustedWinLimit = getWinLimitValue().divide(DIVIDE_BY_FIVE, 4, RoundingMode.HALF_UP); // winLimit / 5 (4.0 / 5 = 0.8)
+        BigDecimal adjustedStopLimit = getStopLimitValue().abs().divide(DIVIDE_BY_FIVE, 4, RoundingMode.HALF_UP); // stopLimit / 5 (2.0 / 5 = 0.4)
 
-        BigDecimal sidewaysUpperBound = adjustedStopLimit.divide(BigDecimal.valueOf(5.0), 4, BigDecimal.ROUND_HALF_UP); // Tighter range
-        BigDecimal sidewaysLowerBound = adjustedStopLimit.divide(BigDecimal.valueOf(10.0), 4, BigDecimal.ROUND_HALF_UP); // Tighter range
-        BigDecimal smallGainThreshold = adjustedWinLimit.divide(BigDecimal.valueOf(10.0), 4, BigDecimal.ROUND_HALF_UP); // Lower threshold
-        BigDecimal earlyLossThreshold = adjustedStopLimit.divide(BigDecimal.valueOf(2.0), 4, BigDecimal.ROUND_HALF_UP); // Tighter loss monitoring
+        BigDecimal sidewaysUpperBound = adjustedStopLimit.divide(DIVIDE_BY_FIVE, 4, RoundingMode.HALF_UP); // Tighter range (0.4 / 5 = 0.08)
+        BigDecimal sidewaysLowerBound = adjustedStopLimit.divide(DIVIDE_BY_TWO, 4, RoundingMode.HALF_UP); // Tighter range (0.4 / 2 = 0.2)
+        BigDecimal smallGainThreshold = adjustedWinLimit.divide(DIVIDE_BY_TWO, 4, RoundingMode.HALF_UP); // Lower threshold (0.8 / 2 = 0.4)
+        BigDecimal earlyLossThreshold = adjustedStopLimit.divide(DIVIDE_BY_TWO, 4, RoundingMode.HALF_UP); // Tighter loss monitoring (0.4 / 2 = 0.2)
 
         // After 90 minutes (1.5h) with minimal movement, tighten stops
-        if (minutes >= 90 && currentPnl.compareTo(sidewaysUpperBound) >= 0
+        if (minutes >= SIDEWAYS_CHECK_MINUTES && currentPnl.compareTo(sidewaysUpperBound) >= 0
                 && currentPnl.compareTo(sidewaysLowerBound.negate()) >= 0) {
 
             // If it's been sideways for 90+ minutes, exit on very small gains
@@ -222,7 +250,7 @@ public class TradeDecisionService {
         }
 
         // After 30 minutes, if losing more than half of adjusted stop limit
-        if (minutes >= 30 && currentPnl.compareTo(earlyLossThreshold.negate()) <= 0) {
+        if (minutes >= EARLY_LOSS_CHECK_MINUTES && currentPnl.compareTo(earlyLossThreshold.negate()) <= 0) {
             log.info("🔻 EARLY LOSS MANAGEMENT: Position down {}% after {} minutes for {}",
                     currentPnl, minutes, order.getSymbol());
 
@@ -242,5 +270,14 @@ public class TradeDecisionService {
 
     private TradeDecision createDecision(TradeAction action, OrderDto order, String reason) {
         return new TradeDecision(action, order, reason);
+    }
+
+    // === HELPER METHODS FOR CONFIG VALUES ===
+    private BigDecimal getWinLimitValue() {
+        return BigDecimal.valueOf(tradingConfig.winLimit());
+    }
+
+    private BigDecimal getStopLimitValue() {
+        return BigDecimal.valueOf(tradingConfig.stopLimit());
     }
 }
