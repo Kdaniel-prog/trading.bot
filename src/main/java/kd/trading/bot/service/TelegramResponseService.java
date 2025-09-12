@@ -1,5 +1,6 @@
 package kd.trading.bot.service;
 
+import kd.trading.bot.config.trading.TradingConfig;
 import kd.trading.bot.model.OrderDto;
 import kd.trading.bot.model.PnlResult;
 import kd.trading.bot.model.TradeRisk;
@@ -23,6 +24,7 @@ import java.util.stream.Collectors;
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 public class TelegramResponseService {
     TradeAnalyticsService analyticsService;
+    TradingConfig tradingConfig;
 
     public String getTradeInfos() {
         Map<OrderDto, PnlResult> tradeInfos = analyticsService.getCurrentTradeAnalytics();
@@ -81,6 +83,7 @@ public class TelegramResponseService {
                 .count();
 
         tradeInfos.forEach((order, pnl) -> {
+            // Fixed: Corrected the logic for direction display
             String directionEmoji = pnl.isLong() ? "🟢" : "🔴";
             String directionText = pnl.isLong() ? "LONG" : "SHORT";
 
@@ -134,20 +137,42 @@ public class TelegramResponseService {
     }
 
     private String getPnlEmoji(BigDecimal pnlPercent) {
-        if (pnlPercent.compareTo(BigDecimal.valueOf(5.0)) >= 0) return "🚀";
-        if (pnlPercent.compareTo(BigDecimal.valueOf(2.0)) >= 0) return "📈";
-        if (pnlPercent.compareTo(BigDecimal.valueOf(0.5)) >= 0) return "✅";
-        if (pnlPercent.compareTo(BigDecimal.valueOf(-0.5)) >= 0) return "⚪";
-        if (pnlPercent.compareTo(BigDecimal.valueOf(-2.0)) >= 0) return "⚠️";
-        if (pnlPercent.compareTo(BigDecimal.valueOf(-5.0)) >= 0) return "🔻";
+        // Use trading config limits for dynamic thresholds
+        double winLimit = tradingConfig.winLimit() != null ? tradingConfig.winLimit() : 5.0;
+        double stopLimit = tradingConfig.stopLimit() != null ? Math.abs(tradingConfig.stopLimit()) : 5.0;
+
+        // Calculate thresholds based on config limits
+        double highWin = winLimit;                    // Full win limit
+        double goodWin = winLimit * 0.4;              // 40% of win limit
+        double smallWin = winLimit * 0.1;             // 10% of win limit
+        double smallLoss = stopLimit * 0.1;           // 10% of stop limit
+        double moderateLoss = stopLimit * 0.4;        // 40% of stop limit
+        double highLoss = stopLimit;                  // Full stop limit
+
+        if (pnlPercent.compareTo(BigDecimal.valueOf(highWin)) >= 0) return "🚀";
+        if (pnlPercent.compareTo(BigDecimal.valueOf(goodWin)) >= 0) return "📈";
+        if (pnlPercent.compareTo(BigDecimal.valueOf(smallWin)) >= 0) return "✅";
+        if (pnlPercent.compareTo(BigDecimal.valueOf(-smallLoss)) >= 0) return "⚪";
+        if (pnlPercent.compareTo(BigDecimal.valueOf(-moderateLoss)) >= 0) return "⚠️";
+        if (pnlPercent.compareTo(BigDecimal.valueOf(-highLoss)) >= 0) return "🔻";
         return "🆘";
     }
 
     private String getPnlStatusText(BigDecimal pnlPercent) {
-        if (pnlPercent.compareTo(BigDecimal.valueOf(5.0)) >= 0) return "🔥 HOT";
-        if (pnlPercent.compareTo(BigDecimal.valueOf(2.0)) >= 0) return "📈 GOOD";
-        if (pnlPercent.compareTo(BigDecimal.valueOf(-2.0)) >= 0) return "⚖️ STABLE";
-        if (pnlPercent.compareTo(BigDecimal.valueOf(-5.0)) >= 0) return "⚠️ RISK";
+        // Use trading config limits for dynamic thresholds
+        double winLimit = tradingConfig.winLimit() != null ? tradingConfig.winLimit() : 5.0;
+        double stopLimit = tradingConfig.stopLimit() != null ? Math.abs(tradingConfig.stopLimit()) : 5.0;
+
+        // Calculate thresholds based on config limits
+        double highWin = winLimit;                    // Full win limit
+        double goodWin = winLimit * 0.4;              // 40% of win limit
+        double moderateLoss = stopLimit * 0.4;        // 40% of stop limit
+        double highLoss = stopLimit;                  // Full stop limit
+
+        if (pnlPercent.compareTo(BigDecimal.valueOf(highWin)) >= 0) return "🔥 HOT";
+        if (pnlPercent.compareTo(BigDecimal.valueOf(goodWin)) >= 0) return "📈 GOOD";
+        if (pnlPercent.compareTo(BigDecimal.valueOf(-moderateLoss)) >= 0) return "⚖️ STABLE";
+        if (pnlPercent.compareTo(BigDecimal.valueOf(-highLoss)) >= 0) return "⚠️ RISK";
         return "🆘 DANGER";
     }
 }

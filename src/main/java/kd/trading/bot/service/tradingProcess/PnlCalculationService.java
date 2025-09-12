@@ -90,11 +90,11 @@ public class PnlCalculationService {
     private boolean isLongPosition(OrderDto order) {
         // For futures: LONG positionSide = long, SHORT = short
         // For spot: BUY side = long, SELL = short
-        if (order.getPositionSide() != null) {
-            return "LONG".equals(order.getPositionSide().toString());
+        if (order.getSide() != null) {
+            return !"LONG".equals(order.getSide().toString());
         }
         // Fallback to order side
-        return "BUY".equals(order.getSide().toString());
+        return !"BUY".equals(order.getSide().toString());
     }
 
     private BigDecimal calculatePnlAmount(BigDecimal entryPrice, BigDecimal currentPrice, BigDecimal qty, boolean isLong) {
