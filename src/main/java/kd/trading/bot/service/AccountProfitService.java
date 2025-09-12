@@ -259,50 +259,25 @@ public class AccountProfitService {
         String direction = getDirectionLabel(order.S);
         String symbol = order.s;
         BigDecimal qty = toBigDecimal(order.q);
-        double realizedProfit = parseProfit(order.rp);
 
-        // For trade opening: show entry price
-        if (realizedProfit == 0.0) {
-            BigDecimal entryPrice = getActualFillPrice(order);
-            BigDecimal totalUsdc = qty.multiply(entryPrice);
-
-            return String.format(
-                    "%s | Symbol: %s | Qty: %s (≈ %.2f USDC) | Entry: %s",
-                    direction,
-                    symbol,
-                    qty.stripTrailingZeros().toPlainString(),
-                    totalUsdc.doubleValue(),
-                    entryPrice.stripTrailingZeros().toPlainString()
-            );
+        // Use the actual fill price method for consistency
+        BigDecimal entryPrice = getActualFillPrice(order);
+        BigDecimal closePrice = toBigDecimal(order.L);
+        if (closePrice.compareTo(BigDecimal.ZERO) == 0) {
+            closePrice = entryPrice;
         }
-        // For trade closing: show entry vs exit price
-        else {
-            // For closing trades, we need to get the entry price from our active order
-            BigDecimal exitPrice = getActualFillPrice(order);
-            BigDecimal entryPrice = getEntryPriceFromActiveOrder(order.s, exitPrice); // Fallback if not found
-            BigDecimal totalUsdc = qty.multiply(exitPrice);
 
-            return String.format(
-                    "%s | Symbol: %s | Qty: %s (≈ %.2f USDC) | Entry: %s | Exit: %s",
-                    direction,
-                    symbol,
-                    qty.stripTrailingZeros().toPlainString(),
-                    totalUsdc.doubleValue(),
-                    entryPrice.stripTrailingZeros().toPlainString(),
-                    exitPrice.stripTrailingZeros().toPlainString()
-            );
-        }
-    }
+        BigDecimal totalUsdc = qty.multiply(entryPrice);
 
-    /**
-     * Get entry price from active order before it's removed
-     */
-    private BigDecimal getEntryPriceFromActiveOrder(String symbol, BigDecimal fallbackPrice) {
-        return TradeService.activeOrderList.stream()
-                .filter(order -> order.getSymbol().equals(symbol))
-                .findFirst()
-                .map(OrderDto::getAvgPrice)
-                .orElse(fallbackPrice);
+        return String.format(
+                "%s | Symbol: %s | Qty: %s (≈ %.2f USDC) | Entry: %s | Close: %s",
+                direction,
+                symbol,
+                qty.stripTrailingZeros().toPlainString(),
+                totalUsdc,
+                entryPrice.stripTrailingZeros().toPlainString(),
+                closePrice.stripTrailingZeros().toPlainString()
+        );
     }
 
     private BigDecimal toBigDecimal(String value) {
