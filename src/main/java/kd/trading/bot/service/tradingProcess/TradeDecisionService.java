@@ -48,29 +48,6 @@ public class TradeDecisionService {
         log.debug("Evaluating {} - PnL: {}%, Duration: {} min, LastWin: {}%",
                 order.getSymbol(), currentPnlPercent, openDuration.toMinutes(), order.getLastWin());
 
-        // === CALCULATE ADJUSTED LIMITS ===
-        BigDecimal adjustedWinLimit = BigDecimal.valueOf(tradingConfig.winLimit() / 5.0); // 1/5 of win limit
-        BigDecimal adjustedStopLimit = BigDecimal.valueOf(tradingConfig.stopLimit() / 5.0); // 1/5 of stop limit
-        BigDecimal zeroThreshold = BigDecimal.ZERO;
-
-        // === IMMEDIATE EXITS WITH ADJUSTED LIMITS ===
-
-        // 1. Adjusted Stop Loss: 1/5 of original
-        if (currentPnlPercent.compareTo(adjustedStopLimit) <= 0) {
-            log.info("🛑 ADJUSTED STOP LOSS triggered at {}% for {} (limit: {}%)",
-                    currentPnlPercent, order.getSymbol(), adjustedStopLimit);
-            return createDecision(TradeAction.CLOSE, order,
-                    String.format("ADJUSTED STOP LOSS: %.2f%%", currentPnlPercent));
-        }
-
-        // 2. Adjusted Target Profit: 1/5 of original
-        if (currentPnlPercent.compareTo(adjustedWinLimit) >= 0) {
-            log.info("🎯 ADJUSTED TARGET PROFIT reached at {}% for {} (limit: {}%)",
-                    currentPnlPercent, order.getSymbol(), adjustedWinLimit);
-            return createDecision(TradeAction.CLOSE, order,
-                    String.format("ADJUSTED TARGET PROFIT: %.2f%%", currentPnlPercent));
-        }
-
         // === 40-MINUTE PROFIT DECLINE CHECK ===
         TradeDecision declineDecision = evaluateProfitDeclineAt40Min(order, currentPnlPercent, openDuration);
         if (declineDecision.shouldExecute()) {
