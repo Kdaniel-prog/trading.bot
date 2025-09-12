@@ -1,58 +1,119 @@
 package kd.trading.bot.service.tradingProcess;
 
-
-import kd.trading.bot.enums.OrderSide;
 import kd.trading.bot.model.BinanceTickerData;
 import kd.trading.bot.model.OrderDto;
 import kd.trading.bot.model.PnlResult;
-import org.springframework.stereotype.Component;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+
+@Slf4j
 @Service
-@Component
 public class PnlCalculationService {
 
-    public PnlResult calculatePnl(OrderDto order, BigDecimal currentPrice) {
-        BigDecimal entryPrice = order.getAvgPrice() != null && order.getAvgPrice().compareTo(BigDecimal.ZERO) > 0
-                ? order.getAvgPrice()
-                : order.getPrice();
+    public Map<OrderDto, PnlResult> calculateBatchPnl(List<OrderDto> orders, List<BinanceTickerData> tickers) {
+        Map<String, BinanceTickerData> tickerMap = tickers.stream()
+                .collect(Collectors.toMap(BinanceTickerData::getSymbol, t -> t));
 
-        BigDecimal qty = order.getExecutedQty() != null && order.getExecutedQty().compareTo(BigDecimal.ZERO) > 0
-                ? order.getExecutedQty()
-                : order.getOrigQty();
-
-        boolean isLong = order.getSide() == OrderSide.BUY;
-
-        BigDecimal pnlAbs = isLong
-                ? currentPrice.subtract(entryPrice).multiply(qty)
-                : entryPrice.subtract(currentPrice).multiply(qty);
-
-        BigDecimal pnlPercent = pnlAbs
-                .divide(entryPrice.multiply(qty), 6, RoundingMode.HALF_UP)
-                .multiply(BigDecimal.valueOf(100));
-
-        return new PnlResult(currentPrice, entryPrice, qty, pnlAbs, pnlPercent, isLong);
+        return orders.stream()
+                .collect(Collectors.toMap(
+                        order -> order,
+                        order -> {
+                            BinanceTickerData ticker = tickerMap.get(order.getSymbol());
+                            if (ticker != null) {
+                                return calculatePnl(order, ticker);
+                            } else {
+                                // No ticker data - show with 0% PnL using entry price
+                                log.warn("No ticker data for {}, showing with entry price", order.getSymbol());
+                                return createZeroPnlResult(order);
+                            }
+                        }
+                ));
     }
 
-    public Map<OrderDto, PnlResult> calculateBatchPnl(List<OrderDto> orders, List<BinanceTickerData> tickers) {
-        Map<OrderDto, PnlResult> results = new LinkedHashMap<>();
+    private PnlResult calculatePnl(OrderDto order, BinanceTickerData ticker) {
+        return calculatePnlWithPrice(order, BigDecimal.valueOf(ticker.getLastPrice()));
+    }
 
-        for (OrderDto order : orders) {
-            tickers.stream()
-                    .filter(t -> t.getSymbol().equalsIgnoreCase(order.getSymbol()))
-                    .findFirst()
-                    .ifPresent(ticker -> {
-                        BigDecimal currentPrice = BigDecimal.valueOf(ticker.getLastPrice());
-                        PnlResult pnl = calculatePnl(order, currentPrice);
-                        results.put(order, pnl);
-                    });
+    private PnlResult createZeroPnlResult(OrderDto order) {
+        BigDecimal entryPrice = getEntryPrice(order);
+        BigDecimal qty = getQuantity(order);
+        boolean isLong = isLongPosition(order);
+
+        return PnlResult.builder()
+                .entryPrice(entryPrice)
+                .currentPrice(entryPrice) // Same as entry = 0% PnL
+                .qty(qty)
+                .pnlAbs(BigDecimal.ZERO)
+                .pnlPercent(BigDecimal.ZERO)
+                .isLong(isLong)
+                .build();
+    }
+
+    private PnlResult calculatePnlWithPrice(OrderDto order, BigDecimal currentPrice) {
+        BigDecimal entryPrice = getEntryPrice(order);
+        BigDecimal qty = getQuantity(order);
+        boolean isLong = isLongPosition(order);
+
+        BigDecimal pnlAbs = calculatePnlAmount(entryPrice, currentPrice, qty, isLong);
+        BigDecimal pnlPercent = calculatePnlPercent(entryPrice, currentPrice, isLong);
+
+        return PnlResult.builder()
+                .entryPrice(entryPrice)
+                .currentPrice(currentPrice)
+                .qty(qty)
+                .pnlAbs(pnlAbs)
+                .pnlPercent(pnlPercent)
+                .isLong(isLong)
+                .build();
+    }
+
+    private BigDecimal getEntryPrice(OrderDto order) {
+        // Use avgPrice if available (for filled orders), otherwise use price
+        return order.getAvgPrice() != null && order.getAvgPrice().compareTo(BigDecimal.ZERO) > 0
+                ? order.getAvgPrice()
+                : order.getPrice();
+    }
+
+    private BigDecimal getQuantity(OrderDto order) {
+        // Use executedQty if available (for filled orders), otherwise use origQty
+        return order.getExecutedQty() != null && order.getExecutedQty().compareTo(BigDecimal.ZERO) > 0
+                ? order.getExecutedQty()
+                : order.getOrigQty();
+    }
+
+    private boolean isLongPosition(OrderDto order) {
+        // For futures: LONG positionSide = long, SHORT = short
+        // For spot: BUY side = long, SELL = short
+        if (order.getPositionSide() != null) {
+            return "LONG".equals(order.getPositionSide().toString());
         }
+        // Fallback to order side
+        return "BUY".equals(order.getSide().toString());
+    }
 
-        return results;
+    private BigDecimal calculatePnlAmount(BigDecimal entryPrice, BigDecimal currentPrice, BigDecimal qty, boolean isLong) {
+        BigDecimal priceDiff = isLong
+                ? currentPrice.subtract(entryPrice)
+                : entryPrice.subtract(currentPrice);
+
+        return priceDiff.multiply(qty).setScale(8, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal calculatePnlPercent(BigDecimal entryPrice, BigDecimal currentPrice, boolean isLong) {
+        if (entryPrice.compareTo(BigDecimal.ZERO) == 0) return BigDecimal.ZERO;
+
+        BigDecimal priceDiff = isLong
+                ? currentPrice.subtract(entryPrice)
+                : entryPrice.subtract(currentPrice);
+
+        return priceDiff.divide(entryPrice, 6, RoundingMode.HALF_UP)
+                .multiply(BigDecimal.valueOf(100))
+                .setScale(2, RoundingMode.HALF_UP);
     }
 }
