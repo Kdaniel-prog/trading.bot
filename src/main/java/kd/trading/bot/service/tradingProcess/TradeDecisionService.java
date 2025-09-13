@@ -114,7 +114,6 @@ public class TradeDecisionService {
         // Using loseOneThird for force exit threshold (1/3 of stop limit)
         BigDecimal forceExitThreshold = loseOneThird;
         BigDecimal zeroThreshold = BigDecimal.ZERO;
-        BigDecimal minDeclineThreshold = DECLINE_MIN_THRESHOLD;
         // Using winOneThird for small profit threshold
         BigDecimal smallProfitThreshold = winOneThird.divide(DIVIDE_BY_TWO, RoundingMode.HALF_UP);
 
