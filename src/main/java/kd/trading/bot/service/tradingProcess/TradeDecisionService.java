@@ -138,8 +138,7 @@ public class TradeDecisionService {
             }
 
             // Even smaller decline threshold for very small profits
-            if (currentPnl.compareTo(smallProfitThreshold) <= 0 &&
-                    decline.compareTo(DECLINE_SMALL_THRESHOLD) >= 0) {
+            if (currentPnl.compareTo(smallProfitThreshold) <= 0) {
                 log.info("📉 40-MIN SMALL PROFIT DECLINE for {} - Peak: {}%, Current: {}%",
                         order.getSymbol(), lastWin, currentPnl);
                 return createDecision(TradeAction.CLOSE, order,
@@ -232,21 +231,13 @@ public class TradeDecisionService {
         long minutes = openDuration.toMinutes();
 
         // Using config-based one-third values as base thresholds
-        BigDecimal sidewaysUpperBound = loseOneThird.divide(DIVIDE_BY_FIVE, 4, RoundingMode.HALF_UP); // loseOneThird / 5
-        BigDecimal sidewaysLowerBound = loseOneThird.divide(DIVIDE_BY_TWO, 4, RoundingMode.HALF_UP); // loseOneThird / 2
-        BigDecimal smallGainThreshold = winOneThird.divide(DIVIDE_BY_TWO, 4, RoundingMode.HALF_UP); // winOneThird / 2
         BigDecimal earlyLossThreshold = loseOneThird.divide(DIVIDE_BY_TWO, 4, RoundingMode.HALF_UP); // loseOneThird / 2
 
         // After 90 minutes (1.5h) with minimal movement, tighten stops
-        if (minutes >= SIDEWAYS_CHECK_MINUTES && currentPnl.compareTo(sidewaysUpperBound) >= 0
-                && currentPnl.compareTo(sidewaysLowerBound) >= 0) {
-
-            // If it's been sideways for 90+ minutes, exit on very small gains
-            if (currentPnl.compareTo(smallGainThreshold) >= 0) {
+        if (minutes >= SIDEWAYS_CHECK_MINUTES && currentPnl.compareTo(winOneThird) >= 0) {
                 log.info("📊 TIGHT SIDEWAYS EXIT: Closing flat trade at {}% for {}", currentPnl, order.getSymbol());
                 return createDecision(TradeAction.CLOSE, order,
                         String.format("TIGHT SIDEWAYS EXIT: %.2f%%", currentPnl));
-            }
         }
 
         // After 30 minutes, if losing more than half of loseOneThird
