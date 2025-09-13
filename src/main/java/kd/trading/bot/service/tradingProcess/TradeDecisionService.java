@@ -120,7 +120,7 @@ public class TradeDecisionService {
 
         // Only check after 40 minutes
         if (minutes < PROFIT_DECLINE_CHECK_MINUTES) {
-            return createDecision(TradeAction.HOLD, order, "Not yet 1 minutes");
+            return createDecision(TradeAction.HOLD, order, "Not yet 30 minutes");
         }
 
         BigDecimal lastWin = order.getLastWin() != null ? order.getLastWin() : zeroThreshold;
