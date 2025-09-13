@@ -84,8 +84,8 @@ public class TelegramResponseService {
 
         tradeInfos.forEach((order, pnl) -> {
             // Fixed: Corrected the logic for direction display
-            String directionEmoji = pnl.isLong() ? "🟢" : "🔴";
-            String directionText = pnl.isLong() ? "LONG" : "SHORT";
+            String directionEmoji = pnl.isLong() ? "🔴" : "🟢";
+            String directionText = pnl.isLong() ? "SHORT" : "LONG";
 
             // PnL emoji based on performance
             String pnlEmoji = getPnlEmoji(pnl.getPnlPercent());
