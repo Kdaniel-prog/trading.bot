@@ -116,7 +116,7 @@ public class TradeDecisionService {
         BigDecimal zeroThreshold = BigDecimal.ZERO;
         BigDecimal minDeclineThreshold = DECLINE_MIN_THRESHOLD;
         // Using winOneThird for small profit threshold
-        BigDecimal smallProfitThreshold = winOneThird.divide(BigDecimal.valueOf(3), RoundingMode.HALF_UP);
+        BigDecimal smallProfitThreshold = winOneThird.divide(DIVIDE_BY_THREE, RoundingMode.HALF_UP);
 
         // Only check after 40 minutes
         if (minutes < PROFIT_DECLINE_CHECK_MINUTES) {
@@ -137,7 +137,7 @@ public class TradeDecisionService {
                         String.format("40-MIN DECLINE: Peak %.2f%% → Current %.2f%%", lastWin, currentPnl));
             }
 
-            // Even smaller decline threshold for very small profits
+            // Even smaller decline threshold for very small profits (fontos)
             if (currentPnl.compareTo(smallProfitThreshold) >= 0) {
                 log.info("📉 40-MIN SMALL PROFIT DECLINE for {} - Peak: {}%, Current: {}%",
                         order.getSymbol(), lastWin, currentPnl);
