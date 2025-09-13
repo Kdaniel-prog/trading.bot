@@ -105,8 +105,10 @@ public class AccountProfitService {
                 // Notify about new position opening
                 tradeClosedUpdated(
                         String.format("🚀 LIMIT order filled - New position opened:\n%s\nEntry Price: %s",
-                                formatTradeDetails(order),
-                                actualEntryPrice.stripTrailingZeros().toPlainString()));
+                                formatTradeDetails(order, false),
+                                actualEntryPrice.stripTrailingZeros().toPlainString())
+
+                );
 
             } else if ("CANCELED".equals(status)) {
                 TradeService.orderDtoList.removeIf(o -> o.getClientOrderId().equals(clientOrderId));
@@ -120,9 +122,11 @@ public class AccountProfitService {
                     updateWinLose(realizedProfit);
                     tradeClosedUpdated(
                             String.format("✅ Trade closed:\n%s\nProfit/Loss: %.2f USDC | Total profit: %.2f USDC",
-                                    formatTradeDetails(order),
+                                    formatTradeDetails(order, true),
                                     realizedProfit,
-                                    profit));
+                                    profit)
+
+                    );
 
                     log.info("✅ Trade closed: {} | Profit/Loss: {}", symbol, realizedProfit);
 
@@ -159,7 +163,7 @@ public class AccountProfitService {
 
                         tradeClosedUpdated(
                                 String.format("🚀 New MARKET trade opened:\n%s",
-                                        formatTradeDetails(order)));
+                                        formatTradeDetails(order, false)));
                     } else {
                         log.debug("⚠️ Duplicate MARKET update ignored: {} ({})", symbol, orderId);
                     }
@@ -246,17 +250,17 @@ public class AccountProfitService {
     }
 
     //Az ellenkezőjét mutatja eladásnál.
-    private String getDirectionLabel(String side) {
-        if ("SELL".equalsIgnoreCase(side)) {
-            return "🟢 LONG ";
-        } else if ("BUY".equalsIgnoreCase(side)) {
-            return "🔴 SHORT ";
+    private String getDirectionLabel(String side, Boolean isClosed) {
+        if ("BUY".equalsIgnoreCase(side)) {
+            return isClosed ? "🟢 LONG " : "🔴 SHORT ";
+        } else if ("SELL".equalsIgnoreCase(side)) {
+            return isClosed ? "🔴 SHORT " : "🟢 LONG ";
         }
         return "❓ UNKNOWN";
     }
 
-    private String formatTradeDetails(OrderTradeUpdateDto.Order order) {
-        String direction = getDirectionLabel(order.S);
+    private String formatTradeDetails(OrderTradeUpdateDto.Order order, Boolean isClosed) {
+        String direction = getDirectionLabel(order.S, isClosed);
         String symbol = order.s;
         BigDecimal qty = toBigDecimal(order.q);
 
