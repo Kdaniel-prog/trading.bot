@@ -78,13 +78,13 @@ public class TradeDecisionService {
         log.debug("Evaluating {} - PnL: {}%, Duration: {} min, LastWin: {}%",
                 order.getSymbol(), currentPnlPercent, openDuration.toMinutes(), order.getLastWin());
 
-        // === 40-MINUTE PROFIT DECLINE CHECK ===
+        // === 40-MINUTE PROFIT DECLINE CHECK === GOOD
         TradeDecision declineDecision = evaluateProfitDeclineAt40Min(order, currentPnlPercent, openDuration);
         if (declineDecision.shouldExecute()) {
             return declineDecision;
         }
 
-        // === TRAILING STOP MECHANISM ===
+        // === TRAILING STOP MECHANISM === Good
         TradeDecision trailingDecision = evaluateTrailingStop(order, currentPnlPercent);
         if (trailingDecision.shouldExecute()) {
             return trailingDecision;
@@ -117,7 +117,6 @@ public class TradeDecisionService {
         BigDecimal minDeclineThreshold = DECLINE_MIN_THRESHOLD;
         // Using winOneThird for small profit threshold
         BigDecimal smallProfitThreshold = winOneThird;
-        BigDecimal smallDeclineThreshold = DECLINE_SMALL_THRESHOLD;
 
         // Only check after 40 minutes
         if (minutes < PROFIT_DECLINE_CHECK_MINUTES) {
@@ -140,7 +139,7 @@ public class TradeDecisionService {
 
             // Even smaller decline threshold for very small profits
             if (currentPnl.compareTo(smallProfitThreshold) <= 0 &&
-                    decline.compareTo(smallDeclineThreshold) >= 0) {
+                    decline.compareTo(DECLINE_SMALL_THRESHOLD) >= 0) {
                 log.info("📉 40-MIN SMALL PROFIT DECLINE for {} - Peak: {}%, Current: {}%",
                         order.getSymbol(), lastWin, currentPnl);
                 return createDecision(TradeAction.CLOSE, order,
@@ -216,9 +215,9 @@ public class TradeDecisionService {
         }
 
         // After 6 hours: Force close if not too negative (using loseOneThird)
-        if (hours >= FORCE_EXIT_6H && currentPnl.compareTo(forceExitThreshold.negate()) >= 0) {
+        if (hours >= FORCE_EXIT_6H && currentPnl.compareTo(forceExitThreshold) >= 0) {
             log.info("⏰ FORCE TIME EXIT (6h+): Closing at {}% for {} (threshold: {}%)",
-                    currentPnl, order.getSymbol(), forceExitThreshold.negate());
+                    currentPnl, order.getSymbol(), forceExitThreshold);
             return createDecision(TradeAction.CLOSE, order,
                     String.format("FORCE TIME EXIT (6h): %.2f%%", currentPnl));
         }
@@ -240,7 +239,7 @@ public class TradeDecisionService {
 
         // After 90 minutes (1.5h) with minimal movement, tighten stops
         if (minutes >= SIDEWAYS_CHECK_MINUTES && currentPnl.compareTo(sidewaysUpperBound) >= 0
-                && currentPnl.compareTo(sidewaysLowerBound.negate()) >= 0) {
+                && currentPnl.compareTo(sidewaysLowerBound) >= 0) {
 
             // If it's been sideways for 90+ minutes, exit on very small gains
             if (currentPnl.compareTo(smallGainThreshold) >= 0) {
@@ -251,7 +250,7 @@ public class TradeDecisionService {
         }
 
         // After 30 minutes, if losing more than half of loseOneThird
-        if (minutes >= EARLY_LOSS_CHECK_MINUTES && currentPnl.compareTo(earlyLossThreshold.negate()) <= 0) {
+        if (minutes >= EARLY_LOSS_CHECK_MINUTES && currentPnl.compareTo(earlyLossThreshold) <= 0) {
             log.info("🔻 EARLY LOSS MANAGEMENT: Position down {}% after {} minutes for {}",
                     currentPnl, minutes, order.getSymbol());
 
@@ -278,16 +277,4 @@ public class TradeDecisionService {
         return BigDecimal.valueOf(tradingConfig.winLimit());
     }
 
-    private BigDecimal getStopLimitValue() {
-        return BigDecimal.valueOf(tradingConfig.stopLimit());
-    }
-
-    // === GETTER METHODS FOR CONFIG-BASED THRESHOLDS ===
-    public BigDecimal getWinOneThird() {
-        return winOneThird;
-    }
-
-    public BigDecimal getLoseOneThird() {
-        return loseOneThird;
-    }
 }
