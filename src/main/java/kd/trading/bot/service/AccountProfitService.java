@@ -252,9 +252,9 @@ public class AccountProfitService {
     //Az ellenkezőjét mutatja eladásnál.
     private String getDirectionLabel(String side, Boolean isClosed) {
         if ("BUY".equalsIgnoreCase(side)) {
-            return isClosed ? "🟢 LONG " : "🔴 SHORT ";
-        } else if ("SELL".equalsIgnoreCase(side)) {
             return isClosed ? "🔴 SHORT " : "🟢 LONG ";
+        } else if ("SELL".equalsIgnoreCase(side)) {
+            return isClosed ? "🟢 LONG " : "🔴 SHORT ";
         }
         return "❓ UNKNOWN";
     }
