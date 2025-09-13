@@ -41,7 +41,7 @@ public class TradeDecisionService {
     // === SPECIFIC TRADING THRESHOLDS ===
     static final BigDecimal DECLINE_SMALL_THRESHOLD = BigDecimal.valueOf(0.3);
     static final BigDecimal DECLINE_MIN_THRESHOLD = BigDecimal.valueOf(0.5);
-    static final int PROFIT_DECLINE_CHECK_MINUTES = 40;
+    static final int PROFIT_DECLINE_CHECK_MINUTES = 1;
     static final int EARLY_LOSS_CHECK_MINUTES = 30;
     static final int SIDEWAYS_CHECK_MINUTES = 90;
     static final int TIME_EXIT_2H = 2;
@@ -120,7 +120,7 @@ public class TradeDecisionService {
 
         // Only check after 40 minutes
         if (minutes < PROFIT_DECLINE_CHECK_MINUTES) {
-            return createDecision(TradeAction.HOLD, order, "Not yet 40 minutes");
+            return createDecision(TradeAction.HOLD, order, "Not yet 1 minutes");
         }
 
         BigDecimal lastWin = order.getLastWin() != null ? order.getLastWin() : zeroThreshold;
