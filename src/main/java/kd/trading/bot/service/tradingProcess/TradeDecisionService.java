@@ -39,11 +39,11 @@ public class TradeDecisionService {
     // === SPECIFIC TRADING THRESHOLDS ==
     static final int PROFIT_DECLINE_CHECK_MINUTES = 30;
     static final int SIDEWAYS_CHECK_MINUTES = 90;
-    static final int LOSE_CHECK_MINUTES = 80;
-    static final int TIME_EXIT_2H = 2;
-    static final int TIME_EXIT_3H = 3;
-    static final int TIME_EXIT_4H = 4;
-    static final int FORCE_EXIT_6H = 6;
+    static final int LOSE_CHECK_MINUTES = 120;
+    static final int TIME_EXIT_1 = 4;
+    static final int TIME_EXIT_2 = 5;
+    static final int TIME_EXIT_3 = 6;
+    static final int FORCE_EXIT_4 = 7;
 
     @PostConstruct
     void init() {
@@ -238,7 +238,7 @@ public class TradeDecisionService {
         BigDecimal forceExitThreshold = loseOneThird; // Using loseOneThird for force exit
 
         // After 2 hours: Take profit above proportional threshold
-        if (hours >= TIME_EXIT_2H && currentPnl.compareTo(winOneThird) <= 0) {
+        if (hours >= TIME_EXIT_1 && currentPnl.compareTo(winOneThird) <= 0) {
             log.info("⏰ TIME EXIT (2h+): Taking {}% profit for {} (threshold: {}%)",
                     currentPnl, order.getSymbol(), winOneThird);
             return createDecision(TradeAction.CLOSE, order,
@@ -246,15 +246,16 @@ public class TradeDecisionService {
         }
 
         // After 3 hours: Take profit above smaller threshold
-        if (hours >= TIME_EXIT_3H && currentPnl.compareTo(winOneThird) <= 0) {
+        /**
+        if (hours >= TIME_EXIT_2 && currentPnl.compareTo(winOneThird) <= 0) {
             log.info("⏰ TIME EXIT (3h+): Taking {}% profit for {} (threshold: {}%)",
                     currentPnl, order.getSymbol(), winOneThird);
             return createDecision(TradeAction.CLOSE, order,
                     String.format("TIME EXIT (3h): %.2f%% profit", currentPnl));
         }
-
+        */
         // After 4 hours: Close if above minimal threshold
-        if (hours >= TIME_EXIT_4H && currentPnl.compareTo(fourHourThreshold) <= 0) {
+        if (hours >= TIME_EXIT_3 && currentPnl.compareTo(fourHourThreshold) <= 0) {
             log.info("⏰ TIME EXIT (4h+): Taking {}% profit for {} (threshold: {}%)",
                     currentPnl, order.getSymbol(), fourHourThreshold);
             return createDecision(TradeAction.CLOSE, order,
@@ -262,7 +263,7 @@ public class TradeDecisionService {
         }
 
         // After 6 hours: Force close if not too negative (using loseOneThird)
-        if (hours >= FORCE_EXIT_6H && currentPnl.compareTo(forceExitThreshold) <= 0) {
+        if (hours >= FORCE_EXIT_4 && currentPnl.compareTo(forceExitThreshold) <= 0) {
             log.info("⏰ FORCE TIME EXIT (6h+): Closing at {}% for {} (threshold: {}%)",
                     currentPnl, order.getSymbol(), forceExitThreshold);
             return createDecision(TradeAction.CLOSE, order,
@@ -288,15 +289,16 @@ public class TradeDecisionService {
                         String.format("TIGHT SIDEWAYS EXIT: %.2f%%", currentPnl));
         }
 
+        /**
         // After 30 minutes, if losing more than half of loseOneThird
         if (minutes >= LOSE_CHECK_MINUTES && currentPnl.compareTo(earlyLossThreshold) >= 0) {
             log.info("🔻 EARLY LOSS MANAGEMENT: Position down {}% after {} minutes for {}",
                     currentPnl, minutes, order.getSymbol());
 
-            return createDecision(TradeAction.CLOSE, order,
+            return createDecision(TradeAction.HOLD, order,
                     String.format("Monitoring early loss: %.2f%%", currentPnl));
         }
-
+        */
         return createDecision(TradeAction.HOLD, order, "Risk management monitoring");
     }
 
