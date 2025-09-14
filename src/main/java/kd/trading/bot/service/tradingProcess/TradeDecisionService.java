@@ -115,9 +115,10 @@ public class TradeDecisionService {
         BigDecimal decline = lastWin.subtract(currentPnl);
         long minutes = openDuration.toMinutes();
 
-        // >= tradeconfig kisbb
-        if (currentPnl.compareTo(BigDecimal.valueOf(tradingConfig.winLimit())) >= 0){
+        BigDecimal winLimitThreshold = BigDecimal.valueOf(tradingConfig.winLimit());    // 6.0%
+        BigDecimal stopLimitThreshold = BigDecimal.valueOf(tradingConfig.stopLimit()); // -3.0%
 
+        if (currentPnl.compareTo(winLimitThreshold) >= 0) {
             log.info("✅ {}-MIN TRADE CONFIG PROFIT DECLINE detected for {} - Peak: {}%, Current: {}%, Decline: {}%",
                     minutes, order.getSymbol(), lastWin, currentPnl, decline);
             return createDecision(TradeAction.CLOSE, order,
@@ -125,13 +126,17 @@ public class TradeDecisionService {
         }
 
         //tradeconfig legyen nagyobb
-        if(currentPnl.compareTo(BigDecimal.valueOf(tradingConfig.stopLimit())) <= 0) {
-
+        if (currentPnl.compareTo(stopLimitThreshold) <= 0) {
             log.info("❌ {}-MIN TRADE CONFIG LOSE detected for {} - Peak: {}%, Current: {}%, Decline: {}%",
                     minutes, order.getSymbol(), lastWin, currentPnl, decline);
             return createDecision(TradeAction.CLOSE, order,
                     String.format("❌ %s-MIN TRADE CONFIG LOSE detected: Peak %.2f%% → Current %.2f%%", minutes, lastWin, currentPnl));
         }
+
+        // No limits reached, continue holding
+        log.debug("No trade limits reached for {} - Current PnL: {}% (Win: {}%, Stop: {}%)",
+                order.getSymbol(), currentPnl, winLimitThreshold, stopLimitThreshold);
+
         return createDecision(TradeAction.HOLD, order, "No significant decline detected");
     }
 

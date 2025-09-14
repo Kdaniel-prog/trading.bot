@@ -33,7 +33,6 @@ public class TradeAnalyticsService {
     }
 
     public void updateTradeAnalytics(List<OrderDto> activeOrders, List<BinanceTickerData> tickers) {
-        log.info("Updating trade analytics for {} active orders", activeOrders.size());
         activeOrders.forEach(order -> log.debug("Active order: {}", order.getSymbol()));
 
         Map<OrderDto, PnlResult> newResults = pnlCalculationService.calculateBatchPnl(activeOrders, tickers);
