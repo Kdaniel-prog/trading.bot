@@ -17,7 +17,7 @@ trading:
 
   coinMinMonth: 4
   coinType: USDT
-  leverage: 3 #ez binancen x20 van nekem alapből.
+  leverage: 10 #ez binancen x20 van nekem alapből.
   swipeValue: 3.49 #0.19 a profit usdt
   banSymbol:
     - 1000SATSUSDT # -0.25
