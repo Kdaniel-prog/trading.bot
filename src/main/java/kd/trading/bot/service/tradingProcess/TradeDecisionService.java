@@ -115,7 +115,7 @@ public class TradeDecisionService {
         BigDecimal decline = lastWin.subtract(currentPnl);
         long minutes = openDuration.toMinutes();
 
-        // >= tradeconfig nagyobb
+        // >= tradeconfig kisbb
         if (currentPnl.compareTo(BigDecimal.valueOf(tradingConfig.winLimit())) >= 0){
 
             log.info("✅ {}-MIN TRADE CONFIG PROFIT DECLINE detected for {} - Peak: {}%, Current: {}%, Decline: {}%",
