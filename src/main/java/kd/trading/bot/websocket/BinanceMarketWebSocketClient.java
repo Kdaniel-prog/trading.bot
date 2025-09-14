@@ -33,7 +33,7 @@ public class BinanceMarketWebSocketClient extends WebSocketClient {
         this.listener = listener;
     }
 
-    @Scheduled(fixedRate = 1 * 60 * 1000) // 15 percenként
+    @Scheduled(fixedRate = 1 * 60 * 1000) // 1 percenként
     public void keepAlive() {
         if (this.isOpen()) {
             this.sendPing();

@@ -277,7 +277,7 @@ public class BinanceRestClient {
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
             JsonNode json = new ObjectMapper().readTree(response.body());
-            if (json.isArray() && json.size() > 0) {
+            if (json.isArray() && !json.isEmpty()) {
                 return new BigDecimal(json.get(0).get("positionAmt").asText());
             }
         } catch (Exception e) {

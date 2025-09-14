@@ -206,33 +206,22 @@ public class TradeDecisionService {
         if (lastWin.compareTo(trailingThreshold) >= 0) {
             BigDecimal dropFromPeak = lastWin.subtract(currentPnl);
 
-            // IMPORTANT: Only trigger if there's an actual meaningful drop (not just rounding differences)
-            BigDecimal minimumDropThreshold = BigDecimal.valueOf(0.01); // 0.01% minimum drop
-
-            if (dropFromPeak.compareTo(minimumDropThreshold) > 0) {
-                // There's an actual drop, now check if we can secure minimum profit
-                if (currentPnl.compareTo(minimumProfitTarget) >= 0) {
-                    log.info("📉 TIGHT TRAILING STOP triggered for {} - Peak: {}%, Current: {}%, Drop: {}%, Secured: {}%",
-                            order.getSymbol(), lastWin, currentPnl, dropFromPeak, currentPnl);
-                    return createDecision(TradeAction.CLOSE, order,
-                            String.format("TIGHT TRAILING STOP: Peak %.2f%% → Secured %.2f%% (Min: %.2f%%)",
-                                    lastWin, currentPnl, minimumProfitTarget));
-                } else {
-                    // Drop too big, would result in less than minimum profit - continue holding and hope for recovery
-                    log.warn("⚠️ TRAILING STOP blocked for {} - Current: {}% < Minimum: {}%, Peak was: {}%",
-                            order.getSymbol(), currentPnl, minimumProfitTarget, lastWin);
-                    return createDecision(TradeAction.HOLD, order,
-                            String.format("Holding for minimum profit: Current %.2f%% < Target %.2f%%",
-                                    currentPnl, minimumProfitTarget));
-                }
+            // There's an actual drop, now check if we can secure minimum profit
+            if (currentPnl.compareTo(minimumProfitTarget) >= 0) {
+                log.info("📉 TIGHT TRAILING STOP triggered for {} - Peak: {}%, Current: {}%, Drop: {}%, Secured: {}%",
+                        order.getSymbol(), lastWin, currentPnl, dropFromPeak, currentPnl);
+                return createDecision(TradeAction.CLOSE, order,
+                        String.format("TIGHT TRAILING STOP: Peak %.2f%% → Secured %.2f%% (Min: %.2f%%)",
+                                lastWin, currentPnl, minimumProfitTarget));
             } else {
-                // No meaningful drop yet, continue monitoring
-                log.debug("💎 Holding at peak for {} - Current: {}% (no significant drop yet)",
-                        order.getSymbol(), currentPnl);
+                // Drop too big, would result in less than minimum profit - continue holding and hope for recovery
+                log.warn("⚠️ TRAILING STOP blocked for {} - Current: {}% < Minimum: {}%, Peak was: {}%",
+                        order.getSymbol(), currentPnl, minimumProfitTarget, lastWin);
                 return createDecision(TradeAction.HOLD, order,
-                        String.format("At peak %.2f%%, waiting for drop > %.2f%%",
-                                currentPnl, minimumDropThreshold));
+                        String.format("Holding for minimum profit: Current %.2f%% < Target %.2f%%",
+                                currentPnl, minimumProfitTarget));
             }
+
         }
 
         return createDecision(TradeAction.HOLD, order, "Trailing stop monitoring");

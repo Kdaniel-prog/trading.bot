@@ -21,7 +21,6 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.*;
 
@@ -91,7 +90,10 @@ public class TradeService {
 
     // --- Trade nyitása ---
     public void openTrade(CoinAnalysis coinAnalysis, SymbolInfo symbol) {
-        tradeQueue.offer(() -> makeTrade(coinAnalysis, symbol));
+        boolean added = tradeQueue.offer(() -> makeTrade(coinAnalysis, symbol));
+        if (!added) {
+            System.err.println("Trade queue is full, trade not queued!");
+        }
     }
 
     private void makeTrade(CoinAnalysis coinAnalysis, SymbolInfo symbol) {
@@ -195,7 +197,6 @@ public class TradeService {
 
         } catch (Exception e) {
             log.info("Hiba történt az aktív orderek betöltésekor: {}", e.getMessage());
-            e.printStackTrace();
         }
     }
 }

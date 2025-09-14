@@ -301,40 +301,37 @@ public class HandleOrderUpdateService {
     }
 
     public String getTrades() {
-        StringBuilder sb = new StringBuilder();
 
         // összefoglaló riport
-        sb.append("*Active trades: ")
-                .append(TradeService.getActiveOrderList().stream()
+
+        String sb = "*Active trades: " +
+                TradeService.getActiveOrderList().stream()
                         .map(OrderDto::getSymbol)
                         .filter(Objects::nonNull)
-                        .toList())
-                .append("\n");
-
-        sb.append("*Order trades: ")
-                .append(TradeService.getOrderDtoList().stream()
+                        .toList() +
+                "\n" +
+                "*Order trades: " +
+                TradeService.getOrderDtoList().stream()
                         .map(OrderDto::getSymbol)
                         .filter(Objects::nonNull)
-                        .toList())
-                .append("\n");
+                        .toList() +
+                "\n";
 
-        return sb.toString();
+        return sb;
     }
 
     public String getProfitStatsReport() {
-        StringBuilder stats = new StringBuilder();
         int totalTrades = winTrades + loseTrades;
 
-        stats.append("====== Profit Statistics ======\n");
-        stats.append(String.format("Total trades: %d\n", totalTrades));
-        stats.append(String.format("Winning trades: %d\n", winTrades));
-        stats.append(String.format("Losing trades: %d\n", loseTrades));
-
         double winRate = totalTrades > 0 ? (winTrades * 100.0 / totalTrades) : 0.0;
-        stats.append(String.format("Win rate: %.2f%%\n", winRate));
-        stats.append(String.format("Accumulated profit: %.4f USDC\n", profit));
+        String stats = "====== Profit Statistics ======\n" +
+                String.format("Total trades: %d\n", totalTrades) +
+                String.format("Winning trades: %d\n", winTrades) +
+                String.format("Losing trades: %d\n", loseTrades) +
+                String.format("Win rate: %.2f%%\n", winRate) +
+                String.format("Accumulated profit: %.4f USDC\n", profit);
 
-        return stats.toString();
+        return stats;
     }
 
     public void tradeClosedUpdated(String message) {
