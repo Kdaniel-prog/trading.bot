@@ -87,14 +87,7 @@ public class PnlCalculationService {
     }
 
     private boolean isLongPosition(OrderDto order) {
-        // For futures: LONG positionSide = long, SHORT = short
-        // For spot: BUY side = long, SELL = short
-        // NOTE: Binance futures returns opposite side, so we use NOT operator
-        if (order.getSide() != null) {
-            return "BUY".equals(order.getSide().toString());
-        }
-        // Fallback to order side
-        return "BUY".equals(order.getSide().toString());
+        return "BUY".equals(String.valueOf(order.getSide()));
     }
 
     private BigDecimal calculatePnlAmount(BigDecimal entryPrice, BigDecimal currentPrice, BigDecimal qty, boolean isLong) {

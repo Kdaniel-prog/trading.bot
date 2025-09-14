@@ -46,7 +46,7 @@ public class TradingTelegramBot extends TelegramLongPollingBot implements Applic
 
     @Override
     public void onUpdateReceived(Update update) {
-        String chatId = null;
+        String chatId;
 
         if (update.hasMessage() && update.getMessage().hasText()) {
             chatId = update.getMessage().getChatId().toString();
