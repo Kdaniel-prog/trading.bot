@@ -124,7 +124,8 @@ public class TradeDecisionService {
                     String.format("✅ %s-MIN TRADE CONFIG PROFIT detected: Peak %.2f%% → Current %.2f%%", minutes, lastWin, currentPnl));
         }
 
-        if(currentPnl.compareTo(BigDecimal.valueOf(tradingConfig.stopLimit())) >= 0) {
+        //tradeconfig legyen nagyobb
+        if(currentPnl.compareTo(BigDecimal.valueOf(tradingConfig.stopLimit())) <= 0) {
 
             log.info("❌ {}-MIN TRADE CONFIG LOSE detected for {} - Peak: {}%, Current: {}%, Decline: {}%",
                     minutes, order.getSymbol(), lastWin, currentPnl, decline);
