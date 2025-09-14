@@ -39,6 +39,10 @@ public class OrderDto {
     private Long goodTillDate;         // ha GTE_GTD, akkor meddig aktív
     private Long updateTime;           // utolsó frissítés időbélyeg
     private LocalDateTime started;
+
+    @Builder.Default
     private Boolean isLoaded = false;
+
+    @Builder.Default
     private BigDecimal lastWin = BigDecimal.valueOf(0.0);
 }
