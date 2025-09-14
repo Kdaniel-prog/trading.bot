@@ -172,6 +172,42 @@ public class BinanceRestClient {
         }
     }
 
+    public void placeMarketOrder(String symbol, BigDecimal qty, Signal signal) {
+        try {
+            String side = signal == Signal.LONG ? "BUY" : "SELL";
+
+            Map<String, String> params = new LinkedHashMap<>();
+            params.put("symbol", symbol);
+            params.put("side", side);
+            params.put("type", "MARKET");
+            params.put("quantity", qty.stripTrailingZeros().toPlainString());
+            params.put("timestamp", String.valueOf(System.currentTimeMillis()));
+
+            String queryString = buildQueryString(params);
+            String signature = util.sign(queryString);
+
+            String finalUrl = config.restBaseUrl() + "/fapi/v1/order?" + queryString + "&signature=" + signature;
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(finalUrl))
+                    .header("X-MBX-APIKEY", config.apiKey())
+                    .POST(HttpRequest.BodyPublishers.noBody())
+                    .build();
+
+            HttpResponse<String> resp = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (resp == null || resp.body() == null) {
+                log.error("Null or empty HTTP response for symbol {}", symbol);
+            } else {
+                log.info("Order response: {}", resp.body());
+            }
+
+        } catch (Exception e) {
+            String msg = (e.getMessage() != null) ? e.getMessage() : e.toString();
+            log.error("Error placing market order for {}: {}", symbol, msg, e);
+        }
+    }
+
     public void changeLeverage(String symbol) {
         try {
             Map<String, String> params = new LinkedHashMap<>();
