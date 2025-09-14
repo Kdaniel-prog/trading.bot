@@ -92,7 +92,7 @@ public class TradeService {
     public void openTrade(CoinAnalysis coinAnalysis, SymbolInfo symbol) {
         boolean added = tradeQueue.offer(() -> makeTrade(coinAnalysis, symbol));
         if (!added) {
-            System.err.println("Trade queue is full, trade not queued!");
+            log.info("Trade queue is full, trade not queued!");
         }
     }
 
