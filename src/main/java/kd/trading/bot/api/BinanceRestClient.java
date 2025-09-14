@@ -120,6 +120,11 @@ public class BinanceRestClient {
 
             HttpResponse<String> response = client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                     .join();
+
+            if (response.body() == null) {
+                throw new RuntimeException("Empty response from Binance getKlines API");
+            }
+
             // Binance Klines = List<List<Object>>
             return mapper.readValue(response.body(), new TypeReference<>() {});
         } catch (IOException e) {
