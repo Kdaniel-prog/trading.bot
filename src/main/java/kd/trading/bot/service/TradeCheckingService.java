@@ -58,11 +58,6 @@ public class TradeCheckingService {
                     log.info(decision.reason());  // Use reason() not getReason()
                     tradeService.closeOrder(decision.order());  // Use order() not getOrder()
                 }
-                case SWIPE_ALL -> {
-                    log.info(decision.reason());
-                    analyticsService.getCurrentTradeAnalytics().keySet()
-                            .forEach(tradeService::closeOrder);
-                }
                 case HOLD -> {
                     // Do nothing
                 }

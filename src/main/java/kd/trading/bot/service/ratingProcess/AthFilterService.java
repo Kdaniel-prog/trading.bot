@@ -3,7 +3,9 @@ package kd.trading.bot.service.ratingProcess;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import kd.trading.bot.model.BinanceTickerData;
+import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
+import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -15,16 +17,17 @@ import java.util.concurrent.*;
 @Service
 @RequiredArgsConstructor
 @Slf4j
+@FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 public class AthFilterService {
 
-    private final BinanceHistoryService historyService;
-    private final Map<String, AthEntry> athCache = new ConcurrentHashMap<>();
+    BinanceHistoryService historyService;
+    Map<String, AthEntry> athCache = new ConcurrentHashMap<>();
 
-    private static final long ATH_TTL_MS = Duration.ofHours(6).toMillis();
+    static long ATH_TTL_MS = Duration.ofHours(6).toMillis();
 
-    // --- queue + worker pool ---
-    private final BlockingQueue<String> athQueue = new LinkedBlockingQueue<>();
-    private final ExecutorService workerPool = Executors.newFixedThreadPool(4);
+    // --- queue + worker pool ---//
+    BlockingQueue<String> athQueue = new LinkedBlockingQueue<>();
+    ExecutorService workerPool = Executors.newFixedThreadPool(4);
 
     @PostConstruct
     public void initWorker() {

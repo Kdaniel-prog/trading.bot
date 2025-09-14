@@ -17,16 +17,12 @@ public class BinanceEventConverter {
             JsonNode root = mapper.readTree(json);
             String eventType = root.get("e").asText();
 
-            switch (eventType) {
-                case "ORDER_TRADE_UPDATE":
-                    return mapper.readValue(json, OrderTradeUpdateDto.class);
-                case "ACCOUNT_UPDATE":
-                    return mapper.readValue(json, AccountUpdateDto.class);
-                case "TRADE_LITE":
-                    return mapper.readValue(json, TradeLiteDto.class);
-                default:
-                    return new UnknownEventDto();
-            }
+            return switch (eventType) {
+                case "ORDER_TRADE_UPDATE" -> mapper.readValue(json, OrderTradeUpdateDto.class);
+                case "ACCOUNT_UPDATE" -> mapper.readValue(json, AccountUpdateDto.class);
+                case "TRADE_LITE" -> mapper.readValue(json, TradeLiteDto.class);
+                default -> new UnknownEventDto();
+            };
         } catch (Exception e) {
             throw new RuntimeException("Failed to parse Binance event: " + json, e);
         }

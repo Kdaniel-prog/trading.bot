@@ -10,11 +10,8 @@ import java.time.Instant;
 @Data
 @Builder
 public class TradeDto {
-    private SymbolInfo symbol;
     private Signal signal;
+    private SymbolInfo symbol;
     private BigDecimal entryPrice;
-    private double stopLimit;
-    private double winLimit;
-    private Instant openedAt;
     private BigDecimal quantity;
 }

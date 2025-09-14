@@ -38,19 +38,6 @@ public class MessageParser {
         }
     }
 
-    public OrderDto parseOrder(String message) {
-        try {
-            ObjectMapper MAPPER = new ObjectMapper();
-            return MAPPER.readValue(
-                    message,
-                    new TypeReference<OrderDto>() {}
-            );
-        } catch (Exception e) {
-            log.error("Failed to parse market data message", e);
-            return new OrderDto();
-        }
-    }
-
     public OrderDto mapToOrderDto(Map<String, Object> pos) {
         OrderDto dto = new OrderDto();
         try {

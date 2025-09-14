@@ -29,23 +29,10 @@ public class TradeServiceHelper {
         BigDecimal normalizedQty = calculateQtyForSymbol(info, lastPrice)
                 .setScale(qtyScale, RoundingMode.DOWN);
 
-        double stopLimit;
-        double winLimit;
-        if (signal == Signal.LONG) {
-            stopLimit = lastPrice.doubleValue() * (1 - tradingConfig.stopLimit() / 100.0);
-            winLimit  = lastPrice.doubleValue() * (1 + tradingConfig.winLimit() / 100.0);
-        } else {
-            stopLimit = lastPrice.doubleValue() * (1 + tradingConfig.stopLimit() / 100.0);
-            winLimit  = lastPrice.doubleValue() * (1 - tradingConfig.winLimit() / 100.0);
-        }
-
         return TradeDto.builder()
                 .symbol(info)
                 .signal(signal)
                 .entryPrice(normalizedPrice)
-                .stopLimit(stopLimit)
-                .winLimit(winLimit)
-                .openedAt(Instant.now())
                 .quantity(normalizedQty)
                 .build();
     }

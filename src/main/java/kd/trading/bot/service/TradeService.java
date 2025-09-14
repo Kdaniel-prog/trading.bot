@@ -106,8 +106,11 @@ public class TradeService {
             return;
         }
 
-        //todo lehet kell ez a dto
-        TradeDto trade = helper.generateTradeDto(coinAnalysis.getSignal(), BigDecimal.valueOf(coinAnalysis.getLastPrice()), symbol);
+        TradeDto trade = helper.generateTradeDto(
+                coinAnalysis.getSignal(),
+                BigDecimal.valueOf(coinAnalysis.getLastPrice()),
+                symbol);
+
         restClient.changeLeverage(coinAnalysis.getSymbol());
 
         restClient.placeOrder(

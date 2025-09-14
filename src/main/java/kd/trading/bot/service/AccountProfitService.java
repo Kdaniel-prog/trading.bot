@@ -5,7 +5,9 @@ import kd.trading.bot.model.BadSymbolsDto;
 import kd.trading.bot.model.OrderDto;
 import kd.trading.bot.model.OrderTradeUpdateDto;
 import kd.trading.bot.telegram.eventType.TradeClosedUpdateEvent;
+import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
+import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
@@ -16,24 +18,54 @@ import java.util.Objects;
 
 import static kd.trading.bot.service.TradeService.BAD_SYMBOL_LIST;
 
+/**
+ * AccountProfitService
+ *
+ * Ez az osztály felel a tradek kezeléséért és a profit statisztikák számításáért.
+ *
+ * - Binance-től érkező order frissítések feldolgozása
+ * - LIMIT és MARKET megbízások életciklusának kezelése
+ * - Aktív és függő tradek nyilvántartása
+ * - Profit, veszteség és win rate számítása
+ * - Trade záráskor események küldése (pl. Telegram)
+ * - Összefoglaló riport készítése az aktuális helyzetről
+ * - Veszteséges szimbólumok nyilvántartása (bad symbols)
+ *
+ * handleOrderUpdate()
+ * ├── handleLimitOrder()
+ * │   ├── handleLimitOrderNew()
+ * │   ├── handleLimitOrderPartiallyFilled()
+ * │   ├── handleLimitOrderFilled()
+ * │   └── handleLimitOrderCanceled()
+ * └── handleMarketOrder()
+ *     ├── handleMarketOrderFilled()
+ *     └── handleMarketOrderExecution()
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
+@FieldDefaults(level = AccessLevel.PRIVATE)
 public class AccountProfitService {
 
-    private final TradeService tradeService;
-    private double profit = 0.0;
-    private final ApplicationEventPublisher publisher;
+    static final String ORDER_TYPE_LIMIT = "LIMIT";
+    static final String ORDER_TYPE_MARKET = "MARKET";
 
-    StringBuilder all;
-    StringBuilder stats;
+    static final String STATUS_NEW = "NEW";
+    static final String STATUS_PARTIALLY_FILLED = "PARTIALLY_FILLED";
+    static final String STATUS_FILLED = "FILLED";
+    static final String STATUS_CANCELED = "CANCELED";
 
-    private int winTrades = 0;
-    private int loseTrades = 0;
+    static final String SIDE_BUY = "BUY";
+    static final String SIDE_SELL = "SELL";
+
+    final TradeService tradeService;
+    final ApplicationEventPublisher publisher;
+
+    double profit = 0.0;
+    int winTrades = 0;
+    int loseTrades = 0;
 
     public void controlOrderListsAndProfit(Object dto) {
-        all = new StringBuilder();
-
         if (dto instanceof OrderTradeUpdateDto order) {
             log.warn("{}", dto);
             handleOrderUpdate(order.o);
@@ -41,134 +73,193 @@ public class AccountProfitService {
     }
 
     public void handleOrderUpdate(OrderTradeUpdateDto.Order order) {
-        String status = order.X; // Status
-        String execType = order.x; // Execution type
-        String type = order.o;     // Order type
+        String orderType = order.o;
+
+        if (ORDER_TYPE_LIMIT.equals(orderType)) {
+            handleLimitOrder(order);
+        } else if (ORDER_TYPE_MARKET.equals(orderType)) {
+            handleMarketOrder(order);
+        }
+    }
+
+    private void handleLimitOrder(OrderTradeUpdateDto.Order order) {
+        String status = order.X;
+
+        switch (status) {
+            case STATUS_NEW -> handleLimitOrderNew(order);
+            case STATUS_PARTIALLY_FILLED -> handleLimitOrderPartiallyFilled(order);
+            case STATUS_FILLED -> handleLimitOrderFilled(order);
+            case STATUS_CANCELED -> handleLimitOrderCanceled(order);
+        }
+    }
+
+    private void handleLimitOrderNew(OrderTradeUpdateDto.Order order) {
+        String clientOrderId = order.c;
         String symbol = order.s;
         long orderId = order.i;
+
+        boolean exists = TradeService.orderDtoList.stream()
+                .anyMatch(o -> o.getClientOrderId().equals(clientOrderId));
+
+        if (!exists) {
+            OrderDto dto = OrderMapper.fromBinanceOrder(order);
+            dto.setStarted(LocalDateTime.now());
+            TradeService.orderDtoList.add(dto);
+            log.info("➕ Open order added: {} ({}) at price: {}", symbol, orderId, order.p);
+        } else {
+            log.debug("⚠️ Duplicate NEW order ignored: {} ({})", symbol, orderId);
+        }
+    }
+
+    private void handleLimitOrderPartiallyFilled(OrderTradeUpdateDto.Order order) {
         String clientOrderId = order.c;
+        String symbol = order.s;
+        long orderId = order.i;
 
+        TradeService.orderDtoList.stream()
+                .filter(o -> o.getClientOrderId().equals(clientOrderId))
+                .findFirst()
+                .ifPresent(o -> {
+                    // Update with actual execution data
+                    o.setExecutedQty(BigDecimal.valueOf(Double.parseDouble(order.z))); // cumulative filled quantity
+                    o.setCumQty(BigDecimal.valueOf(Double.parseDouble(order.z)));
+
+                    // CRITICAL: Update with actual fill price (average price)
+                    BigDecimal actualFillPrice = getActualFillPrice(order);
+                    o.setAvgPrice(actualFillPrice);
+                    o.setPrice(actualFillPrice); // Update original price too
+
+                    log.info("✏️ Open order updated (partial fill): {} ({}) - Filled at: {}", symbol, orderId, actualFillPrice);
+                });
+    }
+
+    private void handleLimitOrderFilled(OrderTradeUpdateDto.Order order) {
+        String clientOrderId = order.c;
+        String symbol = order.s;
+        long orderId = order.i;
+
+        // Remove from pending orders
+        TradeService.orderDtoList.removeIf(o -> o.getClientOrderId().equals(clientOrderId));
+        log.info("❌ Open order removed: {} ({})", symbol, orderId);
+
+        // Create active trade with CORRECT entry price
+        OrderDto activeOrder = createActiveOrderFromFilled(order);
+        tradeService.moveOrderToActive(activeOrder);
+
+        BigDecimal actualEntryPrice = getActualFillPrice(order);
+        log.info("✅ LIMIT order moved to active trades: {} ({}) - Entry price: {}", symbol, orderId, actualEntryPrice);
+
+        // Notify about new position opening
+        String message = String.format("🚀 LIMIT order filled - New position opened:\n%s\nEntry Price: %s",
+                formatTradeDetails(order, false),
+                actualEntryPrice.stripTrailingZeros().toPlainString());
+        tradeClosedUpdated(message);
+    }
+
+    private void handleLimitOrderCanceled(OrderTradeUpdateDto.Order order) {
+        String clientOrderId = order.c;
+        String symbol = order.s;
+        long orderId = order.i;
+
+        TradeService.orderDtoList.removeIf(o -> o.getClientOrderId().equals(clientOrderId));
+        log.info("❌ Open order canceled: {} ({})", symbol, orderId);
+    }
+
+    private void handleMarketOrder(OrderTradeUpdateDto.Order order) {
+        String status = order.X;
+
+        if (STATUS_FILLED.equals(status)) {
+            handleMarketOrderFilled(order);
+        }
+
+        if (STATUS_FILLED.equals(status) || STATUS_PARTIALLY_FILLED.equals(status)) {
+            handleMarketOrderExecution(order);
+        }
+    }
+
+    private void handleMarketOrderFilled(OrderTradeUpdateDto.Order order) {
         double realizedProfit = Double.parseDouble(order.rp);
+        String symbol = order.s;
 
-        // --- LIMIT ORDERS ---
-        if ("LIMIT".equals(type)) {
-            if ("NEW".equals(status)) {
-                boolean exists = TradeService.orderDtoList.stream()
-                        .anyMatch(o -> o.getClientOrderId().equals(clientOrderId));
+        if (realizedProfit != 0.0) {
+            updateProfitAndStats(realizedProfit, symbol, order);
+        }
+    }
 
-                if (!exists) {
-                    OrderDto dto = OrderMapper.fromBinanceOrder(order);
-                    dto.setStarted(LocalDateTime.now());
-                    TradeService.orderDtoList.add(dto);
-                    log.info("➕ Open order added: {} ({}) at price: {}", symbol, orderId, order.p);
-                } else {
-                    log.debug("⚠️ Duplicate NEW order ignored: {} ({})", symbol, orderId);
-                }
-            } else if ("PARTIALLY_FILLED".equals(status)) {
-                TradeService.orderDtoList.stream()
-                        .filter(o -> o.getClientOrderId().equals(clientOrderId))
-                        .findFirst()
-                        .ifPresent(o -> {
-                            // Update with actual execution data
-                            o.setExecutedQty(BigDecimal.valueOf(Double.parseDouble(order.z))); // cumulative filled quantity
-                            o.setCumQty(BigDecimal.valueOf(Double.parseDouble(order.z)));
+    private void handleMarketOrderExecution(OrderTradeUpdateDto.Order order) {
+        double realizedProfit = Double.parseDouble(order.rp);
+        String clientOrderId = order.c;
+        String symbol = order.s;
+        long orderId = order.i;
 
-                            // CRITICAL: Update with actual fill price (average price)
-                            BigDecimal actualFillPrice = getActualFillPrice(order);
-                            o.setAvgPrice(actualFillPrice);
-                            o.setPrice(actualFillPrice); // Update original price too
+        if (realizedProfit != 0.0) {
+            // Trade closed → profit/loss accounted
+            tradeService.removeFromActiveBySymbol(symbol);
+        } else {
+            // New position opened → only add once per orderId
+            if (!isDuplicateMarketOrder(clientOrderId)) {
+                OrderDto myOrder = createMarketOrder(order);
+                tradeService.moveOrderToActive(myOrder);
 
-                            log.info("✏️ Open order updated (partial fill): {} ({}) - Filled at: {}",
-                                    symbol, orderId, actualFillPrice);
-                        });
-            } else if ("FILLED".equals(status)) {
-                // Remove from pending orders
-                TradeService.orderDtoList.removeIf(o -> o.getClientOrderId().equals(clientOrderId));
-                log.info("❌ Open order removed: {} ({})", symbol, orderId);
+                BigDecimal marketEntryPrice = getActualFillPrice(order);
+                log.info("🚀 New MARKET trade opened: {} ({}) - Entry: {}", symbol, orderId, marketEntryPrice);
 
-                // Create active trade with CORRECT entry price
-                OrderDto activeOrder = OrderMapper.fromBinanceOrder(order);
-
-                // CRITICAL: Set the correct entry price from the filled order
-                BigDecimal actualEntryPrice = getActualFillPrice(order);
-                activeOrder.setPrice(actualEntryPrice);     // Entry price
-                activeOrder.setAvgPrice(actualEntryPrice);  // Average price
-                activeOrder.setExecutedQty(BigDecimal.valueOf(Double.parseDouble(order.z))); // Filled quantity
-                activeOrder.setCumQty(BigDecimal.valueOf(Double.parseDouble(order.z)));
-                activeOrder.setStarted(LocalDateTime.now()); // Mark when position started
-
-                tradeService.moveOrderToActive(activeOrder);
-
-                log.info("✅ LIMIT order moved to active trades: {} ({}) - Entry price: {}",
-                        symbol, orderId, actualEntryPrice);
-
-                // Notify about new position opening
-                tradeClosedUpdated(
-                        String.format("🚀 LIMIT order filled - New position opened:\n%s\nEntry Price: %s",
-                                formatTradeDetails(order, false),
-                                actualEntryPrice.stripTrailingZeros().toPlainString())
-
-                );
-
-            } else if ("CANCELED".equals(status)) {
-                TradeService.orderDtoList.removeIf(o -> o.getClientOrderId().equals(clientOrderId));
-                log.info("❌ Open order canceled: {} ({})", symbol, orderId);
+                String message = String.format("🚀 New MARKET trade opened:\n%s", formatTradeDetails(order, false));
+                tradeClosedUpdated(message);
+            } else {
+                log.debug("⚠️ Duplicate MARKET update ignored: {} ({})", symbol, orderId);
             }
-        } else if ("MARKET".equals(type)) {
+        }
+    }
 
-            if("FILLED".equals(status)) {
-                if (realizedProfit != 0.0) {
-                    profit += realizedProfit;
-                    updateWinLose(realizedProfit);
-                    tradeClosedUpdated(
-                            String.format("✅ Trade closed:\n%s\nProfit/Loss: %.2f USDC | Total profit: %.2f USDC",
-                                    formatTradeDetails(order, true),
-                                    realizedProfit,
-                                    profit)
+    private OrderDto createActiveOrderFromFilled(OrderTradeUpdateDto.Order order) {
+        OrderDto activeOrder = OrderMapper.fromBinanceOrder(order);
 
-                    );
+        // CRITICAL: Set the correct entry price from the filled order
+        BigDecimal actualEntryPrice = getActualFillPrice(order);
+        activeOrder.setPrice(actualEntryPrice); // Entry price
+        activeOrder.setAvgPrice(actualEntryPrice); // Average price
+        activeOrder.setExecutedQty(BigDecimal.valueOf(Double.parseDouble(order.z))); // Filled quantity
+        activeOrder.setCumQty(BigDecimal.valueOf(Double.parseDouble(order.z)));
+        activeOrder.setStarted(LocalDateTime.now()); // Mark when position started
 
-                    log.info("✅ Trade closed: {} | Profit/Loss: {}", symbol, realizedProfit);
+        return activeOrder;
+    }
 
-                    if(realizedProfit < 0.0) BAD_SYMBOL_LIST.add(new BadSymbolsDto(symbol, LocalDateTime.now()));
+    private OrderDto createMarketOrder(OrderTradeUpdateDto.Order order) {
+        OrderDto myOrder = OrderMapper.fromBinanceOrder(order);
 
-                }
-            }
+        // For MARKET orders, also ensure correct entry price
+        BigDecimal marketEntryPrice = getActualFillPrice(order);
+        myOrder.setPrice(marketEntryPrice);
+        myOrder.setAvgPrice(marketEntryPrice);
 
-            if ("FILLED".equals(status) || "PARTIALLY_FILLED".equals(status)) {
-                if (realizedProfit != 0.0) {
-                    // Trade closed → profit/loss accounted
-                    tradeService.removeFromActiveBySymbol(symbol);
-                } else {
-                    // New position opened → only add once per orderId
-                    boolean exists = TradeService.activeOrderList.stream()
-                            .anyMatch(o ->{
-                                if(o.getIsLoaded()) {
-                                    return false;
-                                } else {
-                                    return o.getClientOrderId().equals(clientOrderId);
-                                }
-                            });
+        return myOrder;
+    }
 
-                    if (!exists) {
-                        OrderDto myOrder = OrderMapper.fromBinanceOrder(order);
-
-                        // For MARKET orders, also ensure correct entry price
-                        BigDecimal marketEntryPrice = getActualFillPrice(order);
-                        myOrder.setPrice(marketEntryPrice);
-                        myOrder.setAvgPrice(marketEntryPrice);
-
-                        tradeService.moveOrderToActive(myOrder);
-                        log.info("🚀 New MARKET trade opened: {} ({}) - Entry: {}", symbol, orderId, marketEntryPrice);
-
-                        tradeClosedUpdated(
-                                String.format("🚀 New MARKET trade opened:\n%s",
-                                        formatTradeDetails(order, false)));
+    private boolean isDuplicateMarketOrder(String clientOrderId) {
+        return TradeService.activeOrderList.stream()
+                .anyMatch(o -> {
+                    if (o.getIsLoaded()) {
+                        return false;
                     } else {
-                        log.debug("⚠️ Duplicate MARKET update ignored: {} ({})", symbol, orderId);
+                        return o.getClientOrderId().equals(clientOrderId);
                     }
-                }
-            }
+                });
+    }
+
+    private void updateProfitAndStats(double realizedProfit, String symbol, OrderTradeUpdateDto.Order order) {
+        profit += realizedProfit;
+        updateWinLose(realizedProfit);
+
+        String message = String.format("✅ Trade closed:\n%s\nProfit/Loss: %.2f USDC | Total profit: %.2f USDC",
+                formatTradeDetails(order, true), realizedProfit, profit);
+        tradeClosedUpdated(message);
+
+        log.info("✅ Trade closed: {} | Profit/Loss: {}", symbol, realizedProfit);
+
+        if (realizedProfit < 0.0) {
+            BAD_SYMBOL_LIST.add(new BadSymbolsDto(symbol, LocalDateTime.now()));
         }
     }
 
@@ -178,17 +269,17 @@ public class AccountProfitService {
      */
     private BigDecimal getActualFillPrice(OrderTradeUpdateDto.Order order) {
         // Last filled price (most accurate for the current fill)
-        if (order.L != null && !order.L.isEmpty() && !order.L.equals("0")) {
+        if (isValidPrice(order.L)) {
             return new BigDecimal(order.L);
         }
 
         // Average price (weighted average of all fills)
-        if (order.ap != null && !order.ap.isEmpty() && !order.ap.equals("0")) {
+        if (isValidPrice(order.ap)) {
             return new BigDecimal(order.ap);
         }
 
         // Fallback to original order price
-        if (order.p != null && !order.p.isEmpty() && !order.p.equals("0")) {
+        if (isValidPrice(order.p)) {
             return new BigDecimal(order.p);
         }
 
@@ -197,13 +288,16 @@ public class AccountProfitService {
         return BigDecimal.ZERO;
     }
 
-    private double parseProfit(String rp) {
-        return (rp != null && !rp.isEmpty()) ? Double.parseDouble(rp) : 0.0;
+    private boolean isValidPrice(String price) {
+        return price != null && !price.isEmpty() && !price.equals("0");
     }
 
     private void updateWinLose(double realizedProfit) {
-        if (realizedProfit > 0) winTrades++;
-        else if (realizedProfit < 0) loseTrades++;
+        if (realizedProfit > 0) {
+            winTrades++;
+        } else if (realizedProfit < 0) {
+            loseTrades++;
+        }
     }
 
     public String getTrades() {
@@ -228,8 +322,9 @@ public class AccountProfitService {
     }
 
     public String getProfitStatsReport() {
-        stats = new StringBuilder();
+        StringBuilder stats = new StringBuilder();
         int totalTrades = winTrades + loseTrades;
+
         stats.append("====== Profit Statistics ======\n");
         stats.append(String.format("Total trades: %d\n", totalTrades));
         stats.append(String.format("Winning trades: %d\n", winTrades));
@@ -238,22 +333,19 @@ public class AccountProfitService {
         double winRate = totalTrades > 0 ? (winTrades * 100.0 / totalTrades) : 0.0;
         stats.append(String.format("Win rate: %.2f%%\n", winRate));
         stats.append(String.format("Accumulated profit: %.4f USDC\n", profit));
-        return stats.toString();
-    }
 
-    public String getAllLog() {
-        return all.toString();
+        return stats.toString();
     }
 
     public void tradeClosedUpdated(String message) {
         publisher.publishEvent(new TradeClosedUpdateEvent(this, message));
     }
 
-    //Az ellenkezőjét mutatja eladásnál.
+    // Az ellenkezőjét mutatja eladásnál.
     private String getDirectionLabel(String side, Boolean isClosed) {
-        if ("BUY".equalsIgnoreCase(side)) {
+        if (SIDE_BUY.equalsIgnoreCase(side)) {
             return isClosed ? "🔴 SHORT " : "🟢 LONG ";
-        } else if ("SELL".equalsIgnoreCase(side)) {
+        } else if (SIDE_SELL.equalsIgnoreCase(side)) {
             return isClosed ? "🟢 LONG " : "🔴 SHORT ";
         }
         return "❓ UNKNOWN";
@@ -267,6 +359,7 @@ public class AccountProfitService {
         // Use the actual fill price method for consistency
         BigDecimal entryPrice = getActualFillPrice(order);
         BigDecimal closePrice = toBigDecimal(order.L);
+
         if (closePrice.compareTo(BigDecimal.ZERO) == 0) {
             closePrice = entryPrice;
         }
@@ -285,8 +378,6 @@ public class AccountProfitService {
     }
 
     private BigDecimal toBigDecimal(String value) {
-        return (value != null && !value.isEmpty())
-                ? new BigDecimal(value)
-                : BigDecimal.ZERO;
+        return (value != null && !value.isEmpty()) ? new BigDecimal(value) : BigDecimal.ZERO;
     }
 }

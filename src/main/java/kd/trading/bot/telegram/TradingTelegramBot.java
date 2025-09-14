@@ -9,6 +9,7 @@ import kd.trading.bot.telegram.eventType.TradeClosedUpdateEvent;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
+import org.jetbrains.annotations.NotNull;
 import org.springframework.context.ApplicationEvent;
 import org.springframework.context.ApplicationListener;
 import org.springframework.stereotype.Component;
@@ -57,7 +58,7 @@ public class TradingTelegramBot extends TelegramLongPollingBot implements Applic
     }
 
     @Override
-    public void onApplicationEvent(ApplicationEvent event) {
+    public void onApplicationEvent(@NotNull ApplicationEvent event) {
         if (event instanceof TradeClosedUpdateEvent closedUpdateEvent) {
             sendMessage(closedUpdateEvent.getMessage());
         }

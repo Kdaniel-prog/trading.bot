@@ -18,12 +18,12 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@FieldDefaults(level = AccessLevel.PRIVATE)
+@FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 public class TradeAnalyticsService {
-    final PnlCalculationService pnlCalculationService;
+    PnlCalculationService pnlCalculationService;
 
     // In-memory cache - could be Redis in production
-    final Map<OrderDto, PnlResult> lastResults = new ConcurrentHashMap<>();
+    Map<OrderDto, PnlResult> lastResults = new ConcurrentHashMap<>();
 
     public Map<OrderDto, PnlResult> getCurrentTradeAnalytics() {
         log.debug("getCurrentTradeAnalytics called - returning {} trades", lastResults.size());

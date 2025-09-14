@@ -40,30 +40,32 @@ public class MarketDataPipelineService {
 
     public void processMessage(String message, Set<SymbolInfo> tradableSymbols) {
         try {
+
             //0. lépés nézzük meg hogy van e már 5 active tradünk
             if(tradeService.getListSize() >= tradingConfig.maxTrade()) return;
-            log.info("Check tradeservice 0: trade limit");
+            log.info("Check trade service 0: trade limit");
+
             // 1. parse
             List<BinanceTickerData> tickers = parser.parseMarketMessage(message);
             if (tickers.isEmpty()) return;
-            log.info("check tradeservice 1: parse");
+            log.info("check trade service 1: parse");
 
             // 2. prefilter
             List<BinanceTickerData> prefiltered = prefilterService.prefilter(tickers, tradableSymbols);
             if (prefiltered.isEmpty()) return;
-            log.info("check tradeservice 2: prefilter");
+            log.info("check trade service 2: prefilter");
 
             // 3. ath filter
             List<BinanceTickerData> athFiltered = athFilterService.filterBelowAth(prefiltered);
             if (athFiltered.isEmpty()) return;
-            log.info("check tradeservice 3: athFilter");
+            log.info("check trade service 3: athFilter");
 
             // 4. analysis
             List<CoinAnalysis> analyzed = athFiltered.stream()
                     .map(ticker -> algorithmService.analyzeCoin(ticker.getSymbol(), ticker.getLastPrice()) )
                     .toList();
             if (analyzed.isEmpty()) return;
-            log.info("check tradeservice 4: algorithm");
+            log.info("check trade service 4: algorithm");
 
             List<CoinAnalysis> analyses = analyzed.stream()
                     .filter(c -> !c.getSymbol().isBlank()).toList();
@@ -72,16 +74,7 @@ public class MarketDataPipelineService {
             latestResult = rankingService.rank(analyses);
 
             // logoljuk a top és bottom coinokat
-            log.info("---- Ranking Results ----");
-            latestResult.top().forEach(c ->
-                    log.info("TOP  -> {} | score={} | signal={} | price={}",
-                            c.getSymbol(), c.getScore(), c.getSignal(), c.getLastPrice())
-            );
-            latestResult.bottom().forEach(c ->
-                    log.info("BOTTOM -> {} | score={} | signal={} | price={}",
-                            c.getSymbol(), c.getScore(), c.getSignal(), c.getLastPrice())
-            );
-            log.info("---- End Ranking ----");
+            logTopCoins();
 
             //6. trade
             runTradingCycle(tradableSymbols);
@@ -93,6 +86,19 @@ public class MarketDataPipelineService {
         } catch (Exception e) {
             log.error("MarketData pipeline failed", e);
         }
+    }
+
+    private void logTopCoins() {
+        log.info("---- Ranking Results ----");
+        latestResult.top().forEach(c ->
+                log.info("TOP  -> {} | score={} | signal={} | price={}",
+                        c.getSymbol(), c.getScore(), c.getSignal(), c.getLastPrice())
+        );
+        latestResult.bottom().forEach(c ->
+                log.info("BOTTOM -> {} | score={} | signal={} | price={}",
+                        c.getSymbol(), c.getScore(), c.getSignal(), c.getLastPrice())
+        );
+        log.info("---- End Ranking ----");
     }
 
     public void runTradingCycle(Set<SymbolInfo> tradableSymbols) {
