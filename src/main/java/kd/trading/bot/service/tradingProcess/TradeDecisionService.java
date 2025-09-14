@@ -113,21 +113,23 @@ public class TradeDecisionService {
         BigDecimal zeroThreshold = BigDecimal.ZERO;
         BigDecimal lastWin = order.getLastWin() != null ? order.getLastWin() : zeroThreshold;
         BigDecimal decline = lastWin.subtract(currentPnl);
+        long minutes = openDuration.toMinutes();
 
-        if (currentPnl.compareTo(BigDecimal.valueOf(tradingConfig.winLimit())) <= 0){
+        // >= tradeconfig nagyobb
+        if (currentPnl.compareTo(BigDecimal.valueOf(tradingConfig.winLimit())) >= 0){
 
             log.info("✅ {}-MIN TRADE CONFIG PROFIT DECLINE detected for {} - Peak: {}%, Current: {}%, Decline: {}%",
-                    openDuration, order.getSymbol(), lastWin, currentPnl, decline);
+                    minutes, order.getSymbol(), lastWin, currentPnl, decline);
             return createDecision(TradeAction.CLOSE, order,
-                    String.format("%s-MIN TRADECONFIG LOSE detected: Peak %.2f%% → Current %.2f%%", openDuration, lastWin, currentPnl));
+                    String.format("✅ %s-MIN TRADE CONFIG PROFIT detected: Peak %.2f%% → Current %.2f%%", minutes, lastWin, currentPnl));
         }
 
-        if(currentPnl.compareTo(BigDecimal.valueOf(tradingConfig.stopLimit())) <= 0) {
+        if(currentPnl.compareTo(BigDecimal.valueOf(tradingConfig.stopLimit())) >= 0) {
 
             log.info("❌ {}-MIN TRADE CONFIG LOSE detected for {} - Peak: {}%, Current: {}%, Decline: {}%",
-                    openDuration, order.getSymbol(), lastWin, currentPnl, decline);
+                    minutes, order.getSymbol(), lastWin, currentPnl, decline);
             return createDecision(TradeAction.CLOSE, order,
-                    String.format("%s-MIN TRADE CONFIG LOSE detected: Peak %.2f%% → Current %.2f%%", openDuration, lastWin, currentPnl));
+                    String.format("❌ %s-MIN TRADE CONFIG LOSE detected: Peak %.2f%% → Current %.2f%%", minutes, lastWin, currentPnl));
         }
         return createDecision(TradeAction.HOLD, order, "No significant decline detected");
     }

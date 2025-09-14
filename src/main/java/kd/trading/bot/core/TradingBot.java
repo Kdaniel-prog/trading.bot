@@ -5,7 +5,6 @@ import kd.trading.bot.config.binance.BinanceConfig;
 import kd.trading.bot.config.trading.TradingConfig;
 import kd.trading.bot.interfaces.AccountDataListener;
 import kd.trading.bot.interfaces.MarketDataListener;
-import kd.trading.bot.model.TradeDto;
 import kd.trading.bot.service.*;
 import kd.trading.bot.session.BinanceSessionManager;
 import kd.trading.bot.util.BinanceEventConverter;
@@ -29,7 +28,7 @@ public class TradingBot implements MarketDataListener, AccountDataListener {
      BinanceSessionManager sessionManager;
      MarketDataPipelineService pipelineService;
      BinanceEventConverter converter;
-     AccountProfitService accountProfitService;
+     HandleOrderUpdateService handleOrderUpdateService;
      TradeCheckingService checkingService;
      BinanceConfig binanceConfig;
      TradeService tradeService;
@@ -56,7 +55,7 @@ public class TradingBot implements MarketDataListener, AccountDataListener {
     public void onTradeData(String message) {
         Object dto = converter.convert(message);
         log.debug("dto :{}", dto);
-        accountProfitService.controlOrderListsAndProfit(dto);
+        handleOrderUpdateService.controlOrderListsAndProfit(dto);
     }
 
     /**

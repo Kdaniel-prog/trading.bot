@@ -45,7 +45,7 @@ import static kd.trading.bot.service.TradeService.BAD_SYMBOL_LIST;
 @RequiredArgsConstructor
 @Slf4j
 @FieldDefaults(level = AccessLevel.PRIVATE)
-public class AccountProfitService {
+public class HandleOrderUpdateService {
 
     static final String ORDER_TYPE_LIMIT = "LIMIT";
     static final String ORDER_TYPE_MARKET = "MARKET";

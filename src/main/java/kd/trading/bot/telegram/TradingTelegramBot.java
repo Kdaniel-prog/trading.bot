@@ -1,7 +1,7 @@
 package kd.trading.bot.telegram;
 
 import kd.trading.bot.config.telegram.TelegramConfig;
-import kd.trading.bot.service.AccountProfitService;
+import kd.trading.bot.service.HandleOrderUpdateService;
 import kd.trading.bot.service.TelegramCommandService;
 import kd.trading.bot.service.TelegramResponseService;
 import kd.trading.bot.service.tradingProcess.TradeAnalyticsService;
@@ -28,7 +28,7 @@ import java.util.List;
 @RequiredArgsConstructor
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 public class TradingTelegramBot extends TelegramLongPollingBot implements ApplicationListener<ApplicationEvent> {
-    AccountProfitService accountProfitService;
+    HandleOrderUpdateService handleOrderUpdateService;
     TelegramCommandService commandService;
     TelegramResponseService telegramResponseService;
     TradeAnalyticsService analyticsService;
@@ -88,12 +88,12 @@ public class TradingTelegramBot extends TelegramLongPollingBot implements Applic
 
             // === EXISTING COMMANDS ===
             case "/stats":
-                sendMessage(accountProfitService.getProfitStatsReport());
+                sendMessage(handleOrderUpdateService.getProfitStatsReport());
                 sendReplyKeyboard(chatId);
                 break;
 
             case "/trades list":
-                sendMessage(accountProfitService.getTrades());
+                sendMessage(handleOrderUpdateService.getTrades());
                 sendReplyKeyboard(chatId);
                 break;
 
