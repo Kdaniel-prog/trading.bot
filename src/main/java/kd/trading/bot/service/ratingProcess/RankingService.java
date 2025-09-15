@@ -15,13 +15,23 @@ public class RankingService {
             return new RankedCoins(List.of(), List.of());
         }
 
+        // csökkenő score szerint rendezés
         List<CoinAnalysis> sorted = analyzed.stream()
-                .sorted((a, b) -> Double.compare(b.getScore(), a.getScore())) // csökkenő
+                .sorted((a, b) -> Double.compare(b.getScore(), a.getScore()))
                 .toList();
 
+        // TOP 5
         List<CoinAnalysis> top = sorted.stream().limit(5).toList();
+
+        // BOTTOM 5, de csak azok, akik nincsenek a topban
+        List<String> topSymbols = top.stream()
+                .map(CoinAnalysis::getSymbol)
+                .toList();
+
         List<CoinAnalysis> bottom = sorted.stream()
-                .skip(Math.max(sorted.size() - 5, 0))
+                .filter(c -> !topSymbols.contains(c.getSymbol())) // szűrés
+                .sorted((a, b) -> Double.compare(a.getScore(), b.getScore())) // növekvő score bottomhoz
+                .limit(5)
                 .toList();
 
         return new RankedCoins(top, bottom);
