@@ -75,12 +75,6 @@ public class TradeDecisionService {
         log.debug("Evaluating {} - PnL: {}%, Duration: {} min, LastWin: {}%",
                 order.getSymbol(), currentPnlPercent, openDuration.toMinutes(), order.getLastWin());
 
-        // === EARLY QUICK PROFIT TAKING ===
-        TradeDecision earlyDecision = evaluateEarlyProfitTaking(order, currentPnlPercent, openDuration);
-        if (earlyDecision.shouldExecute()) {
-            return earlyDecision;
-        }
-
         // === TRADE CONFIG CHECK ===
         TradeDecision configDecision = tradeConfigLimits(order, currentPnlPercent, openDuration);
         if (configDecision.shouldExecute()) {
@@ -114,35 +108,6 @@ public class TradeDecisionService {
         return createDecision(TradeAction.HOLD, order, "Holding position");
     }
 
-    /**
-     * NEW: Early profit taking for quick wins
-     */
-    private TradeDecision evaluateEarlyProfitTaking(OrderDto order, BigDecimal currentPnl, Duration openDuration) {
-        long minutes = openDuration.toMinutes();
-
-        // Quick profit thresholds
-        BigDecimal quickProfitThreshold = BigDecimal.valueOf(0.8); // 0.8%
-        BigDecimal veryQuickProfitThreshold = BigDecimal.valueOf(1.2); // 1.2%
-
-        // After just 10 minutes, if we have 1.2%+ profit, consider taking it
-        if (minutes >= 10 && currentPnl.compareTo(veryQuickProfitThreshold) >= 0) {
-            log.info("🚀 VERY QUICK PROFIT for {} - {}% after {} min",
-                    order.getSymbol(), currentPnl, minutes);
-            return createDecision(TradeAction.CLOSE, order,
-                    String.format("VERY QUICK PROFIT: %.2f%% in %d min", currentPnl, minutes));
-        }
-
-        // After 15 minutes, take 0.8%+ profit
-        if (minutes >= EARLY_PROFIT_CHECK_MINUTES && currentPnl.compareTo(quickProfitThreshold) >= 0) {
-            log.info("⚡ EARLY QUICK PROFIT for {} - {}% after {} min",
-                    order.getSymbol(), currentPnl, minutes);
-            return createDecision(TradeAction.CLOSE, order,
-                    String.format("EARLY PROFIT: %.2f%% in %d min", currentPnl, minutes));
-        }
-
-        return createDecision(TradeAction.HOLD, order, "No early profit opportunity");
-    }
-
     private TradeDecision tradeConfigLimits(OrderDto order, BigDecimal currentPnl, Duration openDuration) {
         BigDecimal zeroThreshold = BigDecimal.ZERO;
         BigDecimal lastWin = order.getLastWin() != null ? order.getLastWin() : zeroThreshold;
@@ -170,42 +135,46 @@ public class TradeDecisionService {
     }
 
     /**
-     * IMPROVED: More aggressive profit decline detection
+     * Check for profit decline after 40 minutes
      */
     private TradeDecision evaluateProfitDeclineAtXMin(OrderDto order, BigDecimal currentPnl, Duration openDuration) {
         long minutes = openDuration.toMinutes();
 
-        // More aggressive thresholds
-        BigDecimal smallDeclineThreshold = BigDecimal.valueOf(0.4); // 0.4% decline
-        BigDecimal mediumDeclineThreshold = BigDecimal.valueOf(0.7); // 0.7% decline
+        // Using loseOneThird for force exit threshold (1/3 of stop limit)
+        BigDecimal forceExitThreshold = loseOneThird;
         BigDecimal zeroThreshold = BigDecimal.ZERO;
+        // Using winOneThird for small profit threshold
+        BigDecimal smallProfitThreshold = winOneThird.divide(DIVIDE_BY_TWO, RoundingMode.HALF_UP);
 
+        // Only check after 40 minutes
         if (minutes < PROFIT_DECLINE_CHECK_MINUTES) {
-            return createDecision(TradeAction.HOLD, order, "Too early for decline check");
+            return createDecision(TradeAction.HOLD, order, "Not yet 30 minutes");
         }
 
         BigDecimal lastWin = order.getLastWin() != null ? order.getLastWin() : zeroThreshold;
 
+        // If we're in profit and had higher profit before
         if (currentPnl.compareTo(zeroThreshold) > 0 && lastWin.compareTo(currentPnl) > 0) {
             BigDecimal decline = lastWin.subtract(currentPnl);
 
-            // More aggressive: Close on smaller declines
-            if (decline.compareTo(smallDeclineThreshold) >= 0 && currentPnl.compareTo(BigDecimal.valueOf(0.3)) >= 0) {
-                log.info("📉 SMALL PROFIT DECLINE for {} - Peak: {}%, Current: {}%, Decline: {}%",
-                        order.getSymbol(), lastWin, currentPnl, decline);
+            // If profit declined by more than threshold from peak after 40+ minutes
+            if (decline.compareTo(forceExitThreshold) >= 0) {
+                log.info("📉 {}-MIN PROFIT DECLINE detected for {} - Peak: {}%, Current: {}%, Decline: {}%",
+                        PROFIT_DECLINE_CHECK_MINUTES, order.getSymbol(), lastWin, currentPnl, decline);
                 return createDecision(TradeAction.CLOSE, order,
-                        String.format("SMALL DECLINE: Peak %.2f%% → Current %.2f%%", lastWin, currentPnl));
+                        String.format("%s-MIN DECLINE: Peak %.2f%% → Current %.2f%%", PROFIT_DECLINE_CHECK_MINUTES, lastWin, currentPnl));
             }
 
-            if (decline.compareTo(mediumDeclineThreshold) >= 0) {
-                log.info("📉 PROFIT DECLINE for {} - Peak: {}%, Current: {}%, Decline: {}%",
-                        order.getSymbol(), lastWin, currentPnl, decline);
+            // Even smaller decline threshold for very small profits (fontos)
+            if (currentPnl.compareTo(smallProfitThreshold) >= 0) {
+                log.info("📉 {}-MIN SMALL PROFIT DECLINE for {} - Peak: {}%, Current: {}%",
+                        PROFIT_DECLINE_CHECK_MINUTES, order.getSymbol(), lastWin, currentPnl);
                 return createDecision(TradeAction.CLOSE, order,
-                        String.format("DECLINE: Peak %.2f%% → Current %.2f%%", lastWin, currentPnl));
+                        String.format("%s-MIN SMALL DECLINE: Peak %.2f%% → Current %.2f%%",PROFIT_DECLINE_CHECK_MINUTES, lastWin, currentPnl));
             }
         }
 
-        return createDecision(TradeAction.HOLD, order, "No significant decline");
+        return createDecision(TradeAction.HOLD, order, "No significant decline detected");
     }
 
     /**
