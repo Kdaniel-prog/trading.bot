@@ -1,5 +1,6 @@
 package kd.trading.bot.service.ratingProcess;
 
+import kd.trading.bot.enums.Signal;
 import kd.trading.bot.model.CoinAnalysis;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -21,7 +22,10 @@ public class RankingService {
                 .toList();
 
         // TOP 5
-        List<CoinAnalysis> top = sorted.stream().limit(5).toList();
+        List<CoinAnalysis> top = sorted.stream()
+                .filter(t -> t.getSignal() != Signal.SHORT)
+                .limit(5)
+                .toList();
 
         // BOTTOM 5, de csak azok, akik nincsenek a topban
         List<String> topSymbols = top.stream()
@@ -29,6 +33,7 @@ public class RankingService {
                 .toList();
 
         List<CoinAnalysis> bottom = sorted.stream()
+                .filter(t -> t.getSignal() != Signal.LONG)
                 .filter(c -> !topSymbols.contains(c.getSymbol())) // szűrés
                 .sorted((a, b) -> Double.compare(a.getScore(), b.getScore())) // növekvő score bottomhoz
                 .limit(5)
