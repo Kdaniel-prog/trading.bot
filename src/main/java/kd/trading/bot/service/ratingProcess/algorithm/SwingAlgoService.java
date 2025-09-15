@@ -139,19 +139,21 @@ public class SwingAlgoService {
             // === SIGNAL DECISION WITH PROVEN LOGIC ===
             Signal signal = Signal.NO_TRADE;
 
-            // LONG signals - Bearish reversal strategy (opens LONG when everything looks bearish)
+            // **LONG pozíciók (új):**
+            // 1. score <= -7.0 → LONG (bearish reversal - vásárlás a mélyponton)
             if (score <= -7.0 && primaryDowntrend && macdBearish && strongVolume && goodVolatility) {
                 signal = Signal.LONG; // Opens LONG position (bearish reversal strategy)
             }
-            // LONG signals - Bullish trend following (opens LONG when moderately bullish)
+            // 2. score >= 4.0 && score < 7.0 → LONG (bullish trend-követés - mérsékelten bullish környezetben)
             else if (score >= 4.0 && score < 7.0 && primaryUptrend && macdBullish && goodVolatility) {
                 signal = Signal.LONG; // Opens LONG position (trend-following strategy)
             }
-            // SHORT signals - High confidence bullish setups (proven reversal strategy)
+            // **SHORT pozíciók (megtartott proven stratégia):**
+            // 1. score >= 7.0 → SHORT (bullish reversal - eladás a csúcson)
             else if (score >= 7.0 && primaryUptrend && macdBullish && strongVolume && goodVolatility) {
                 signal = Signal.SHORT; // Opens SHORT position (bullish reversal strategy)
             }
-            // SHORT signals - Moderate bearish setups (proven trend-following strategy)
+            // 2. score <= -6.0 → SHORT (bearish trend-követés)
             else if (score <= -6.0 && primaryDowntrend && macdBearish && goodVolatility) {
                 signal = Signal.SHORT; // Opens SHORT position (bearish trend-following strategy)
             }
