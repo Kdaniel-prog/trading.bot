@@ -157,7 +157,7 @@ public class SwingAlgoService {
             }
 
             if (primaryDowntrend && macdBearish && goodVolatility) {
-                if (score >= -6.5 && score <= -5.0) {
+                if (score >= -6.0 && score <= -5.0) {
                     signal = Signal.SHORT;
                 } else if (score >= -12.0 && score <= -8.0) {
                     signal = Signal.LONG;
