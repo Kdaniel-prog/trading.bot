@@ -10,6 +10,9 @@ import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.List;
 
 @Service
@@ -23,6 +26,15 @@ public class SwingAlgoService {
 
     public CoinAnalysis analyzeCoin(String symbol, double lastPrice) {
         try {
+            // === HUNGARIAN TIME CHECK ===
+            ZonedDateTime hungarianTime = ZonedDateTime.now(ZoneId.of("Europe/Budapest"));
+            LocalTime currentTime = hungarianTime.toLocalTime();
+
+            // Check if current time is between 20:00 (8 PM) and 06:00 (6 AM) next day
+            boolean isNightTime = currentTime.isAfter(LocalTime.of(20, 0)) ||
+                    currentTime.isBefore(LocalTime.of(6, 0));
+
+
             // Get 4H and daily data for better swing analysis
             List<List<Object>> fourHourKlines = restClient.getKlines(symbol, "4h", 300);
             List<List<Object>> dailyKlines = restClient.getKlines(symbol, "1d", 200);
@@ -69,20 +81,19 @@ public class SwingAlgoService {
             double macdSignal = macd4h[1];
             double macdHist = macd4h[2];
 
-            // MACD momentum conditions - More flexible
-            boolean macdBullish = macdLine > macdSignal;
-            boolean macdBearish = macdLine < macdSignal;
-            boolean macdStrengthening = Math.abs(macdHist) > 0; // Any momentum change
+            // MACD momentum conditions
+            boolean macdBullish = macdLine > macdSignal && macdHist > 0;
+            boolean macdBearish = macdLine < macdSignal && macdHist < 0;
 
-            // RSI conditions - More permissive ranges
-            boolean rsiBullishEntry = rsi4h > 35 && rsi4h < 70;
-            boolean rsiBearishEntry = rsi4h > 30 && rsi4h < 65;
+            // RSI conditions for entry
+            boolean rsiBullishEntry = rsi4h > 45 && rsi4h < 65; // Not oversold/overbought
+            boolean rsiBearishEntry = rsi4h > 35 && rsi4h < 55;
 
             // === VOLUME ANALYSIS ===
             double avgVolume20 = volumes4h.subList(volumes4h.size() - 20, volumes4h.size())
                     .stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
             double currentVolume = volumes4h.get(volumes4h.size() - 1);
-            boolean strongVolume = currentVolume > 1.2 * avgVolume20; // Lowered threshold
+            boolean strongVolume = currentVolume > 1.3 * avgVolume20;
 
             // === SUPPORT/RESISTANCE LEVELS ===
             double[] srLevels = indicatorUtil.calculateSupportResistance(highs4h, lows4h, closes4h);
@@ -96,87 +107,66 @@ public class SwingAlgoService {
             // === VOLATILITY FILTER ===
             double atr = indicatorUtil.calculateATR(highs4h, lows4h, closes4h, 14);
             double volatilityPct = (atr / currentPrice) * 100;
-            boolean goodVolatility = volatilityPct > 1.5 && volatilityPct < 10.0; // More permissive range
+            boolean goodVolatility = volatilityPct > 2.0 && volatilityPct < 8.0; // 2-8% volatility
 
             // === MARKET STRUCTURE ===
-            boolean higherHighs = indicatorUtil.isHigherHighsPattern(highs4h, 8); // Shorter period
-            boolean lowerLows = indicatorUtil.isLowerLowsPattern(lows4h, 8);
+            boolean higherHighs = indicatorUtil.isHigherHighsPattern(highs4h, 10);
+            boolean lowerLows = indicatorUtil.isLowerLowsPattern(lows4h, 10);
 
-            // === ENHANCED SCORING SYSTEM ===
+            // === SCORING SYSTEM ===
             double score = 0.0;
 
-            // Base trend bias (reduced weight)
-            if (primaryUptrend) score += 2.5;
-            if (primaryDowntrend) score -= 2.5;
+            // Primary trend (most important)
+            if (primaryUptrend) score += 4.0;
+            if (primaryDowntrend) score -= 4.0;
 
-            // Momentum alignment (increased importance)
-            if (macdBullish && rsiBullishEntry) score += 3.5;
-            if (macdBearish && rsiBearishEntry) score -= 3.5;
-
-            // MACD strengthening bonus
-            if (macdStrengthening) {
-                if (macdBullish) score += 1.0;
-                if (macdBearish) score -= 1.0;
-            }
+            // Momentum alignment
+            if (macdBullish && rsiBullishEntry) score += 3.0;
+            if (macdBearish && rsiBearishEntry) score -= 3.0;
 
             // Market structure
-            if (higherHighs) score += 2.5;
-            if (lowerLows) score -= 2.5;
+            if (higherHighs) score += 2.0;
+            if (lowerLows) score -= 2.0;
 
             // Volume confirmation
-            if (strongVolume) score += 2.0; // Increased weight
+            if (strongVolume) score += 1.5;
 
-            // Volatility bonus (good volatility = more opportunity)
-            if (goodVolatility) score += 1.5;
-            else if (volatilityPct < 1.0) score -= 1.5; // Only penalize very low volatility
+            // Volatility filter
+            if (goodVolatility) score += 1.0;
+            else score -= 2.0; // Penalize low/extreme volatility
 
-            // Risk/Reward based on S/R levels - more aggressive
-            if (distanceFromSupport > 1.5) score += 1.0; // Easier to qualify
-            if (distanceFromResistance > 2.0) score += 1.5; // Room to move
-            if (distanceFromResistance < 1.0) score -= 1.5; // Reduced penalty
+            // Risk/Reward based on S/R levels
+            if (distanceFromSupport > 2.0 && distanceFromSupport < 8.0) score += 1.5; // Good distance from support
+            if (distanceFromResistance > 3.0) score += 1.0; // Room to move up
+            if (distanceFromResistance < 1.5) score -= 2.0; // Too close to resistance
 
-            // RSI momentum bonus instead of extreme penalty
-            if (rsi4h > 60 && rsi4h < 75) score += 1.0; // Bullish momentum
-            if (rsi4h > 25 && rsi4h < 40) score -= 1.0; // Bearish momentum
-            if (rsi4h > 80 || rsi4h < 20) score -= 2.0; // Only extreme levels penalized
+            // Additional filters to reduce false signals
+            if (rsi4h > 75 || rsi4h < 25) score -= 3.0; // Avoid extreme RSI
 
-            // Trend alignment bonus
+            // Trend consistency check
             double ema10_4h = indicatorUtil.EMA(closes4h, 10);
-            if (ema10_4h > ema20_4h && ema20_4h > ema50_4h) score += 2.0; // Strong uptrend
-            if (ema10_4h < ema20_4h && ema20_4h < ema50_4h) score -= 2.0; // Strong downtrend
+            if (primaryUptrend && ema10_4h > ema20_4h && ema20_4h > ema50_4h) score += 1.5;
+            if (primaryDowntrend && ema10_4h < ema20_4h && ema20_4h < ema50_4h) score -= 1.5;
 
-            // Short-term momentum check
-            double priceChange5Bars = (closes4h.get(closes4h.size() - 1) - closes4h.get(closes4h.size() - 6)) / closes4h.get(closes4h.size() - 6) * 100;
-            if (Math.abs(priceChange5Bars) > 3.0) { // Strong recent movement
-                if (priceChange5Bars > 0) score += 1.5; // Recent bullish momentum
-                else score -= 1.5; // Recent bearish momentum
-            }
-
-            // === OPTIMIZED SIGNAL DECISION ===
+            // === SIGNAL DECISION WITH FLEXIBLE CRITERIA ===
             Signal signal = Signal.NO_TRADE;
 
-            // LONG signals - Lowered threshold and fixed signal direction
-            if (score >= 4.5 && goodVolatility && rsiBullishEntry) {
-                signal = Signal.LONG; // FIXED: Was incorrectly SHORT
-            }
-            // SHORT signals - Lowered threshold and fixed signal direction
-            else if (score <= -4.5 && goodVolatility && rsiBearishEntry) {
-                signal = Signal.SHORT; // FIXED: Was incorrectly LONG
-            }
-            // Additional opportunities with medium confidence
-            else if (score >= 3.0 && macdBullish && strongVolume && primaryUptrend) {
-                signal = Signal.LONG;
-            }
-            else if (score <= -3.0 && macdBearish && strongVolume && primaryDowntrend) {
+            // LONG signals - High confidence setups
+            if (score >= 7.0 && primaryUptrend && macdBullish && strongVolume && goodVolatility) { //ez egésznap marad short
                 signal = Signal.SHORT;
             }
-            // Quick momentum plays
-            else if (score >= 2.5 && Math.abs(priceChange5Bars) > 4.0 && priceChange5Bars > 0 && rsi4h < 65) {
-                signal = Signal.LONG;
+            // SHORT signals - You can adjust this threshold to get more/fewer SHORT signals // este 20: 00 és reggel 6 között short
+            else if (score <= -6.0 && primaryDowntrend && macdBearish && goodVolatility) {
+                if(isNightTime) {
+                    signal = Signal.SHORT;
+                } else {
+                    signal = Signal.LONG;
+                }
             }
-            else if (score <= -2.5 && Math.abs(priceChange5Bars) > 4.0 && priceChange5Bars < 0 && rsi4h > 35) {
-                signal = Signal.SHORT;
-            }
+            // NO_TRADE for everything else (most cases will be NO_TRADE for safety)
+
+            log.debug("Analysis for {}: Score={}, RSI={}, MACD={}, Volume={}, ATR%={}",
+                    symbol, score, rsi4h, macdLine, currentVolume/avgVolume20, volatilityPct);
 
             return new CoinAnalysis(symbol, score, signal, lastPrice);
 
@@ -185,4 +175,5 @@ public class SwingAlgoService {
             return new CoinAnalysis(symbol, 0.0, Signal.NO_TRADE, lastPrice);
         }
     }
+
 }
