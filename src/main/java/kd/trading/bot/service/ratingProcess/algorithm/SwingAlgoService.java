@@ -136,18 +136,25 @@ public class SwingAlgoService {
             if (primaryUptrend && ema10_4h > ema20_4h && ema20_4h > ema50_4h) score += 1.5;
             if (primaryDowntrend && ema10_4h < ema20_4h && ema20_4h < ema50_4h) score -= 1.5;
 
-            // === SIGNAL DECISION WITH FLEXIBLE CRITERIA ===
+            // === SIGNAL DECISION WITH PROVEN LOGIC ===
             Signal signal = Signal.NO_TRADE;
 
-            // LONG signals - High confidence setups
-            if (score >= 7.0 && primaryUptrend && macdBullish && strongVolume && goodVolatility) {
-                signal = Signal.SHORT;
+            // LONG signals - Bearish reversal strategy (opens LONG when everything looks bearish)
+            if (score <= -7.0 && primaryDowntrend && macdBearish && strongVolume && goodVolatility) {
+                signal = Signal.LONG; // Opens LONG position (bearish reversal strategy)
             }
-            // SHORT signals - You can adjust this threshold to get more/fewer SHORT signals
+            // LONG signals - Bullish trend following (opens LONG when moderately bullish)
+            else if (score >= 4.0 && score < 7.0 && primaryUptrend && macdBullish && goodVolatility) {
+                signal = Signal.LONG; // Opens LONG position (trend-following strategy)
+            }
+            // SHORT signals - High confidence bullish setups (proven reversal strategy)
+            else if (score >= 7.0 && primaryUptrend && macdBullish && strongVolume && goodVolatility) {
+                signal = Signal.SHORT; // Opens SHORT position (bullish reversal strategy)
+            }
+            // SHORT signals - Moderate bearish setups (proven trend-following strategy)
             else if (score <= -6.0 && primaryDowntrend && macdBearish && goodVolatility) {
-                signal = Signal.SHORT;
+                signal = Signal.SHORT; // Opens SHORT position (bearish trend-following strategy)
             }
-            // NO_TRADE for everything else (most cases will be NO_TRADE for safety)
 
             log.debug("Analysis for {}: Score={}, RSI={}, MACD={}, Volume={}, ATR%={}",
                     symbol, score, rsi4h, macdLine, currentVolume/avgVolume20, volatilityPct);
