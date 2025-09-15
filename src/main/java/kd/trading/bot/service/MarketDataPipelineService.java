@@ -63,6 +63,7 @@ public class MarketDataPipelineService {
             // 4. analysis
             List<CoinAnalysis> analyzed = athFiltered.stream()
                     .map(ticker -> algorithmService.analyzeCoin(ticker.getSymbol(), ticker.getLastPrice()) )
+                    .filter(t -> t.getSignal() != Signal.NO_TRADE)
                     .toList();
             if (analyzed.isEmpty()) return;
             log.info("check trade service 4: algorithm");
