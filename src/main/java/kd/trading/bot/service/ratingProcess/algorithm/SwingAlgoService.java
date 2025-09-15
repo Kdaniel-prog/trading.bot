@@ -153,11 +153,11 @@ public class SwingAlgoService {
 
             // LONG signals - High confidence setups
             if (score >= 7.0 && primaryUptrend && macdBullish && strongVolume && goodVolatility) {
-                signal = isNightTime ? Signal.SHORT : Signal.LONG;
+                signal = isNightTime ? Signal.LONG : Signal.SHORT;
             }
             // SHORT signals - You can adjust this threshold to get more/fewer SHORT signals
             else if (score <= -6.0 && primaryDowntrend && macdBearish && goodVolatility) {
-                signal = Signal.SHORT;
+                signal = isNightTime ? Signal.SHORT : Signal.LONG;
             }
             // NO_TRADE for everything else (most cases will be NO_TRADE for safety)
 
