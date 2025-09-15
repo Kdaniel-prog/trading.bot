@@ -36,14 +36,15 @@ public class TradeDecisionService {
     BigDecimal winOneThird;
     BigDecimal loseOneThird;
 
-    // === SPECIFIC TRADING THRESHOLDS ==
-    static final int PROFIT_DECLINE_CHECK_MINUTES = 30;
-    static final int SIDEWAYS_CHECK_MINUTES = 90;
-    static final int LOSE_CHECK_MINUTES = 120;
-    static final int TIME_EXIT_1 = 4;
-    static final int TIME_EXIT_2 = 5;
-    static final int TIME_EXIT_3 = 6;
-    static final int FORCE_EXIT_4 = 7;
+    // === OPTIMIZED TRADING THRESHOLDS ===
+    static final int EARLY_PROFIT_CHECK_MINUTES = 15; // Earlier profit taking opportunity
+    static final int PROFIT_DECLINE_CHECK_MINUTES = 25; // Reduced from 30
+    static final int SIDEWAYS_CHECK_MINUTES = 60; // Reduced from 90
+    static final int LOSE_CHECK_MINUTES = 45; // Reduced from 120
+    static final int TIME_EXIT_1 = 3; // Reduced from 4 hours
+    static final int TIME_EXIT_2 = 4; // Reduced from 5 hours
+    static final int TIME_EXIT_3 = 5; // Reduced from 6 hours
+    static final int FORCE_EXIT_4 = 6; // Reduced from 7 hours
 
     @PostConstruct
     void init() {
@@ -74,33 +75,37 @@ public class TradeDecisionService {
         log.debug("Evaluating {} - PnL: {}%, Duration: {} min, LastWin: {}%",
                 order.getSymbol(), currentPnlPercent, openDuration.toMinutes(), order.getLastWin());
 
+        // === EARLY QUICK PROFIT TAKING ===
+        TradeDecision earlyDecision = evaluateEarlyProfitTaking(order, currentPnlPercent, openDuration);
+        if (earlyDecision.shouldExecute()) {
+            return earlyDecision;
+        }
 
-        // === TRADE CONFIG CHECK === GOOD
+        // === TRADE CONFIG CHECK ===
         TradeDecision configDecision = tradeConfigLimits(order, currentPnlPercent, openDuration);
         if (configDecision.shouldExecute()) {
             return configDecision;
         }
 
+        // === IMPROVED TRAILING STOP MECHANISM ===
+        TradeDecision trailingDecision = evaluateImprovedTrailingStop(order, currentPnlPercent, openDuration);
+        if (trailingDecision.shouldExecute()) {
+            return trailingDecision;
+        }
 
-        // === X-MINUTE PROFIT DECLINE CHECK === GOOD
+        // === FASTER PROFIT DECLINE CHECK ===
         TradeDecision declineDecision = evaluateProfitDeclineAtXMin(order, currentPnlPercent, openDuration);
         if (declineDecision.shouldExecute()) {
             return declineDecision;
         }
 
-        // === TRAILING STOP MECHANISM === Good
-        TradeDecision trailingDecision = evaluateTrailingStop(order, currentPnlPercent);
-        if (trailingDecision.shouldExecute()) {
-            return trailingDecision;
-        }
-
-        // === TIME-BASED EXITS ===
+        // === MORE AGGRESSIVE TIME-BASED EXITS ===
         TradeDecision timeDecision = evaluateTimeBasedExit(order, currentPnlPercent, openDuration);
         if (timeDecision.shouldExecute()) {
             return timeDecision;
         }
 
-        // === RISK REDUCTION OVER TIME ===
+        // === TIGHTER RISK REDUCTION ===
         TradeDecision riskDecision = evaluateRiskReduction(order, currentPnlPercent, openDuration);
         if (riskDecision.shouldExecute()) {
             return riskDecision;
@@ -109,197 +114,207 @@ public class TradeDecisionService {
         return createDecision(TradeAction.HOLD, order, "Holding position");
     }
 
+    /**
+     * NEW: Early profit taking for quick wins
+     */
+    private TradeDecision evaluateEarlyProfitTaking(OrderDto order, BigDecimal currentPnl, Duration openDuration) {
+        long minutes = openDuration.toMinutes();
+
+        // Quick profit thresholds
+        BigDecimal quickProfitThreshold = BigDecimal.valueOf(0.8); // 0.8%
+        BigDecimal veryQuickProfitThreshold = BigDecimal.valueOf(1.2); // 1.2%
+
+        // After just 10 minutes, if we have 1.2%+ profit, consider taking it
+        if (minutes >= 10 && currentPnl.compareTo(veryQuickProfitThreshold) >= 0) {
+            log.info("🚀 VERY QUICK PROFIT for {} - {}% after {} min",
+                    order.getSymbol(), currentPnl, minutes);
+            return createDecision(TradeAction.CLOSE, order,
+                    String.format("VERY QUICK PROFIT: %.2f%% in %d min", currentPnl, minutes));
+        }
+
+        // After 15 minutes, take 0.8%+ profit
+        if (minutes >= EARLY_PROFIT_CHECK_MINUTES && currentPnl.compareTo(quickProfitThreshold) >= 0) {
+            log.info("⚡ EARLY QUICK PROFIT for {} - {}% after {} min",
+                    order.getSymbol(), currentPnl, minutes);
+            return createDecision(TradeAction.CLOSE, order,
+                    String.format("EARLY PROFIT: %.2f%% in %d min", currentPnl, minutes));
+        }
+
+        return createDecision(TradeAction.HOLD, order, "No early profit opportunity");
+    }
+
     private TradeDecision tradeConfigLimits(OrderDto order, BigDecimal currentPnl, Duration openDuration) {
         BigDecimal zeroThreshold = BigDecimal.ZERO;
         BigDecimal lastWin = order.getLastWin() != null ? order.getLastWin() : zeroThreshold;
         BigDecimal decline = lastWin.subtract(currentPnl);
         long minutes = openDuration.toMinutes();
 
-        BigDecimal winLimitThreshold = BigDecimal.valueOf(tradingConfig.winLimit());    // 6.0%
-        BigDecimal stopLimitThreshold = BigDecimal.valueOf(tradingConfig.stopLimit()); // -3.0%
+        BigDecimal winLimitThreshold = BigDecimal.valueOf(tradingConfig.winLimit());
+        BigDecimal stopLimitThreshold = BigDecimal.valueOf(tradingConfig.stopLimit());
 
         if (currentPnl.compareTo(winLimitThreshold) >= 0) {
-            log.info("✅ {}-MIN TRADE CONFIG PROFIT DECLINE detected for {} - Peak: {}%, Current: {}%, Decline: {}%",
-                    minutes, order.getSymbol(), lastWin, currentPnl, decline);
+            log.info("✅ TRADE CONFIG WIN LIMIT reached for {} - Current: {}%",
+                    order.getSymbol(), currentPnl);
             return createDecision(TradeAction.CLOSE, order,
-                    String.format("✅ %s-MIN TRADE CONFIG PROFIT detected: Peak %.2f%% → Current %.2f%%", minutes, lastWin, currentPnl));
+                    String.format("WIN LIMIT: %.2f%%", currentPnl));
         }
 
-        //tradeconfig legyen nagyobb
         if (currentPnl.compareTo(stopLimitThreshold) <= 0) {
-            log.info("❌ {}-MIN TRADE CONFIG LOSE detected for {} - Peak: {}%, Current: {}%, Decline: {}%",
-                    minutes, order.getSymbol(), lastWin, currentPnl, decline);
+            log.info("❌ TRADE CONFIG STOP LIMIT reached for {} - Current: {}%",
+                    order.getSymbol(), currentPnl);
             return createDecision(TradeAction.CLOSE, order,
-                    String.format("❌ %s-MIN TRADE CONFIG LOSE detected: Peak %.2f%% → Current %.2f%%", minutes, lastWin, currentPnl));
+                    String.format("STOP LIMIT: %.2f%%", currentPnl));
         }
 
-        // No limits reached, continue holding
-        log.debug("No trade limits reached for {} - Current PnL: {}% (Win: {}%, Stop: {}%)",
-                order.getSymbol(), currentPnl, winLimitThreshold, stopLimitThreshold);
-
-        return createDecision(TradeAction.HOLD, order, "No significant decline detected");
+        return createDecision(TradeAction.HOLD, order, "Within config limits");
     }
 
     /**
-     * Check for profit decline after 40 minutes
+     * IMPROVED: More aggressive profit decline detection
      */
     private TradeDecision evaluateProfitDeclineAtXMin(OrderDto order, BigDecimal currentPnl, Duration openDuration) {
         long minutes = openDuration.toMinutes();
 
-        // Using loseOneThird for force exit threshold (1/3 of stop limit)
-        BigDecimal forceExitThreshold = loseOneThird;
+        // More aggressive thresholds
+        BigDecimal smallDeclineThreshold = BigDecimal.valueOf(0.4); // 0.4% decline
+        BigDecimal mediumDeclineThreshold = BigDecimal.valueOf(0.7); // 0.7% decline
         BigDecimal zeroThreshold = BigDecimal.ZERO;
-        // Using winOneThird for small profit threshold
-        BigDecimal smallProfitThreshold = winOneThird.divide(DIVIDE_BY_TWO, RoundingMode.HALF_UP);
 
-        // Only check after 40 minutes
         if (minutes < PROFIT_DECLINE_CHECK_MINUTES) {
-            return createDecision(TradeAction.HOLD, order, "Not yet 30 minutes");
+            return createDecision(TradeAction.HOLD, order, "Too early for decline check");
         }
 
         BigDecimal lastWin = order.getLastWin() != null ? order.getLastWin() : zeroThreshold;
 
-        // If we're in profit and had higher profit before
         if (currentPnl.compareTo(zeroThreshold) > 0 && lastWin.compareTo(currentPnl) > 0) {
             BigDecimal decline = lastWin.subtract(currentPnl);
 
-            // If profit declined by more than threshold from peak after 40+ minutes
-            if (decline.compareTo(forceExitThreshold) >= 0) {
-                log.info("📉 {}-MIN PROFIT DECLINE detected for {} - Peak: {}%, Current: {}%, Decline: {}%",
-                        PROFIT_DECLINE_CHECK_MINUTES, order.getSymbol(), lastWin, currentPnl, decline);
+            // More aggressive: Close on smaller declines
+            if (decline.compareTo(smallDeclineThreshold) >= 0 && currentPnl.compareTo(BigDecimal.valueOf(0.3)) >= 0) {
+                log.info("📉 SMALL PROFIT DECLINE for {} - Peak: {}%, Current: {}%, Decline: {}%",
+                        order.getSymbol(), lastWin, currentPnl, decline);
                 return createDecision(TradeAction.CLOSE, order,
-                        String.format("%s-MIN DECLINE: Peak %.2f%% → Current %.2f%%", PROFIT_DECLINE_CHECK_MINUTES, lastWin, currentPnl));
+                        String.format("SMALL DECLINE: Peak %.2f%% → Current %.2f%%", lastWin, currentPnl));
             }
 
-            // Even smaller decline threshold for very small profits (fontos)
-            if (currentPnl.compareTo(smallProfitThreshold) >= 0) {
-                log.info("📉 {}-MIN SMALL PROFIT DECLINE for {} - Peak: {}%, Current: {}%",
-                        PROFIT_DECLINE_CHECK_MINUTES, order.getSymbol(), lastWin, currentPnl);
+            if (decline.compareTo(mediumDeclineThreshold) >= 0) {
+                log.info("📉 PROFIT DECLINE for {} - Peak: {}%, Current: {}%, Decline: {}%",
+                        order.getSymbol(), lastWin, currentPnl, decline);
                 return createDecision(TradeAction.CLOSE, order,
-                        String.format("%s-MIN SMALL DECLINE: Peak %.2f%% → Current %.2f%%",PROFIT_DECLINE_CHECK_MINUTES, lastWin, currentPnl));
+                        String.format("DECLINE: Peak %.2f%% → Current %.2f%%", lastWin, currentPnl));
             }
         }
 
-        return createDecision(TradeAction.HOLD, order, "No significant decline detected");
+        return createDecision(TradeAction.HOLD, order, "No significant decline");
     }
 
     /**
-     * Trailing stop mechanism using lastWin field with tighter controls and minimum profit guarantee
+     * IMPROVED: More responsive trailing stop
      */
-    private TradeDecision evaluateTrailingStop(OrderDto order, BigDecimal currentPnl) {
+    private TradeDecision evaluateImprovedTrailingStop(OrderDto order, BigDecimal currentPnl, Duration openDuration) {
         BigDecimal lastWin = order.getLastWin() != null ? order.getLastWin() : BigDecimal.ZERO;
+        long minutes = openDuration.toMinutes();
 
-        // Using winLimit / 4 for trailing threshold (1.5% when winLimit is 6%)
-        BigDecimal trailingThreshold = getWinLimitValue().divide(DIVIDE_BY_FOUR, 4, RoundingMode.HALF_UP);
+        // Dynamic trailing threshold based on time and peak
+        BigDecimal baseTrailingThreshold = BigDecimal.valueOf(0.5); // 0.5% base
+        BigDecimal dynamicThreshold = baseTrailingThreshold;
 
-        // MINIMUM PROFIT we want to secure (0.6%)
-        BigDecimal minimumProfitTarget = BigDecimal.valueOf(0.6);
+        // Tighter trailing after longer duration
+        if (minutes > 60) {
+            dynamicThreshold = BigDecimal.valueOf(0.3); // 0.3% after 1 hour
+        }
+        if (minutes > 120) {
+            dynamicThreshold = BigDecimal.valueOf(0.2); // 0.2% after 2 hours
+        }
 
-        // Update lastWin if current profit is higher
+        // Update lastWin
         if (currentPnl.compareTo(lastWin) > 0) {
             order.setLastWin(currentPnl);
             log.debug("📈 New high for {}: {}%", order.getSymbol(), currentPnl);
-            return createDecision(TradeAction.HOLD, order, "New profit high recorded");
+            return createDecision(TradeAction.HOLD, order, "New profit high");
         }
 
-        // Only activate trailing stop if we had at least the threshold profit AND there's an actual drop
-        if (lastWin.compareTo(trailingThreshold) >= 0) {
+        // Activate trailing if we had significant profit
+        if (lastWin.compareTo(BigDecimal.valueOf(0.8)) >= 0) { // If peak was 0.8%+
             BigDecimal dropFromPeak = lastWin.subtract(currentPnl);
 
-            // There's an actual drop, now check if we can secure minimum profit
-            if (currentPnl.compareTo(minimumProfitTarget) >= 0) {
-                log.info("📉 TIGHT TRAILING STOP triggered for {} - Peak: {}%, Current: {}%, Drop: {}%, Secured: {}%",
-                        order.getSymbol(), lastWin, currentPnl, dropFromPeak, currentPnl);
-                return createDecision(TradeAction.CLOSE, order,
-                        String.format("TIGHT TRAILING STOP: Peak %.2f%% → Secured %.2f%% (Min: %.2f%%)",
-                                lastWin, currentPnl, minimumProfitTarget));
-            } else {
-                // Drop too big, would result in less than minimum profit - continue holding and hope for recovery
-                log.warn("⚠️ TRAILING STOP blocked for {} - Current: {}% < Minimum: {}%, Peak was: {}%",
-                        order.getSymbol(), currentPnl, minimumProfitTarget, lastWin);
-                return createDecision(TradeAction.HOLD, order,
-                        String.format("Holding for minimum profit: Current %.2f%% < Target %.2f%%",
-                                currentPnl, minimumProfitTarget));
-            }
+            if (dropFromPeak.compareTo(dynamicThreshold) >= 0) {
+                // Ensure we still have reasonable profit
+                BigDecimal minimumAcceptable = BigDecimal.valueOf(0.25); // 0.25% minimum
 
+                if (currentPnl.compareTo(minimumAcceptable) >= 0) {
+                    log.info("📉 IMPROVED TRAILING STOP for {} - Peak: {}%, Current: {}%, Drop: {}%",
+                            order.getSymbol(), lastWin, currentPnl, dropFromPeak);
+                    return createDecision(TradeAction.CLOSE, order,
+                            String.format("TRAILING: Peak %.2f%% → Current %.2f%%", lastWin, currentPnl));
+                }
+            }
         }
 
-        return createDecision(TradeAction.HOLD, order, "Trailing stop monitoring");
+        return createDecision(TradeAction.HOLD, order, "Trailing monitoring");
     }
 
     /**
-     * Time-based exit strategy with config-proportional controls
+     * More aggressive time-based exits
      */
     private TradeDecision evaluateTimeBasedExit(OrderDto order, BigDecimal currentPnl, Duration openDuration) {
         long hours = openDuration.toHours();
+        long minutes = openDuration.toMinutes();
 
-        // Calculate proportional thresholds from config using winOneThird as base
-        BigDecimal fourHourThreshold = winOneThird.divide(DIVIDE_BY_TWO, 4, RoundingMode.HALF_UP); // winOneThird / 2
-        BigDecimal forceExitThreshold = loseOneThird; // Using loseOneThird for force exit
+        // More aggressive time-based thresholds
+        BigDecimal smallProfitThreshold = BigDecimal.valueOf(0.3); // 0.3%
+        BigDecimal tinyProfitThreshold = BigDecimal.valueOf(0.15); // 0.15%
 
-        // After 2 hours: Take profit above proportional threshold
-        if (hours >= TIME_EXIT_1 && currentPnl.compareTo(winOneThird) <= 0) {
-            log.info("⏰ TIME EXIT (2h+): Taking {}% profit for {} (threshold: {}%)",
-                    currentPnl, order.getSymbol(), winOneThird);
+        // After 3 hours: Take any reasonable profit
+        if (hours >= TIME_EXIT_1 && currentPnl.compareTo(smallProfitThreshold) >= 0) {
+            log.info("⏰ TIME EXIT (3h+): Taking {}% profit for {}", currentPnl, order.getSymbol());
             return createDecision(TradeAction.CLOSE, order,
-                    String.format("TIME EXIT (2h): %.2f%% profit", currentPnl));
+                    String.format("TIME EXIT (3h): %.2f%%", currentPnl));
         }
 
-        // After 3 hours: Take profit above smaller threshold
-        /**
-        if (hours >= TIME_EXIT_2 && currentPnl.compareTo(winOneThird) <= 0) {
-            log.info("⏰ TIME EXIT (3h+): Taking {}% profit for {} (threshold: {}%)",
-                    currentPnl, order.getSymbol(), winOneThird);
+        // After 4 hours: Take tiny profits too
+        if (hours >= TIME_EXIT_2 && currentPnl.compareTo(tinyProfitThreshold) >= 0) {
+            log.info("⏰ TIME EXIT (4h+): Taking tiny {}% profit for {}", currentPnl, order.getSymbol());
             return createDecision(TradeAction.CLOSE, order,
-                    String.format("TIME EXIT (3h): %.2f%% profit", currentPnl));
-        }
-        */
-        // After 4 hours: Close if above minimal threshold
-        if (hours >= TIME_EXIT_3 && currentPnl.compareTo(fourHourThreshold) <= 0) {
-            log.info("⏰ TIME EXIT (4h+): Taking {}% profit for {} (threshold: {}%)",
-                    currentPnl, order.getSymbol(), fourHourThreshold);
-            return createDecision(TradeAction.CLOSE, order,
-                    String.format("TIME EXIT (4h): %.2f%% profit", currentPnl));
+                    String.format("TIME EXIT (4h): %.2f%%", currentPnl));
         }
 
-        // After 6 hours: Force close if not too negative (using loseOneThird)
-        if (hours >= FORCE_EXIT_4 && currentPnl.compareTo(forceExitThreshold) <= 0) {
-            log.info("⏰ FORCE TIME EXIT (6h+): Closing at {}% for {} (threshold: {}%)",
-                    currentPnl, order.getSymbol(), forceExitThreshold);
+        // After 5 hours: Close if not too negative
+        if (hours >= TIME_EXIT_3 && currentPnl.compareTo(BigDecimal.valueOf(-1.5)) >= 0) {
+            log.info("⏰ TIME EXIT (5h+): Closing at {}% for {}", currentPnl, order.getSymbol());
             return createDecision(TradeAction.CLOSE, order,
-                    String.format("FORCE TIME EXIT (6h): %.2f%%", currentPnl));
+                    String.format("TIME EXIT (5h): %.2f%%", currentPnl));
+        }
+
+        // After 6 hours: Force close unless very negative
+        if (hours >= FORCE_EXIT_4 && currentPnl.compareTo(BigDecimal.valueOf(-2.5)) >= 0) {
+            log.info("⏰ FORCE TIME EXIT (6h+): Closing at {}% for {}", currentPnl, order.getSymbol());
+            return createDecision(TradeAction.CLOSE, order,
+                    String.format("FORCE EXIT (6h): %.2f%%", currentPnl));
         }
 
         return createDecision(TradeAction.HOLD, order, "Time criteria not met");
     }
 
     /**
-     * Progressive risk reduction based on time and performance with tighter controls
+     * Tighter risk reduction
      */
     private TradeDecision evaluateRiskReduction(OrderDto order, BigDecimal currentPnl, Duration openDuration) {
         long minutes = openDuration.toMinutes();
 
-        // Using config-based one-third values as base thresholds
-        BigDecimal earlyLossThreshold = loseOneThird.divide(DIVIDE_BY_TWO, 4, RoundingMode.HALF_UP); // loseOneThird / 2
-
-        // After 90 minutes (1.5h) with minimal movement, tighten stops
-        if (minutes >= SIDEWAYS_CHECK_MINUTES && currentPnl.compareTo(winOneThird) >= 0) {
-                log.info("📊 TIGHT SIDEWAYS EXIT: Closing flat trade at {}% for {}", currentPnl, order.getSymbol());
+        // Close sideways trades faster
+        if (minutes >= SIDEWAYS_CHECK_MINUTES) {
+            // If PnL between -0.2% and +0.2% after 1 hour, close it
+            if (currentPnl.compareTo(BigDecimal.valueOf(-0.2)) >= 0 &&
+                    currentPnl.compareTo(BigDecimal.valueOf(0.2)) <= 0) {
+                log.info("📊 TIGHT SIDEWAYS EXIT: Closing flat trade at {}% for {}",
+                        currentPnl, order.getSymbol());
                 return createDecision(TradeAction.CLOSE, order,
-                        String.format("TIGHT SIDEWAYS EXIT: %.2f%%", currentPnl));
+                        String.format("SIDEWAYS: %.2f%%", currentPnl));
+            }
         }
 
-        /**
-        // After 30 minutes, if losing more than half of loseOneThird
-        if (minutes >= LOSE_CHECK_MINUTES && currentPnl.compareTo(earlyLossThreshold) >= 0) {
-            log.info("🔻 EARLY LOSS MANAGEMENT: Position down {}% after {} minutes for {}",
-                    currentPnl, minutes, order.getSymbol());
-
-            return createDecision(TradeAction.HOLD, order,
-                    String.format("Monitoring early loss: %.2f%%", currentPnl));
-        }
-        */
-        return createDecision(TradeAction.HOLD, order, "Risk management monitoring");
+        return createDecision(TradeAction.HOLD, order, "Risk monitoring");
     }
 
     private Duration getOrderDuration(OrderDto order) {
@@ -313,9 +328,7 @@ public class TradeDecisionService {
         return new TradeDecision(action, order, reason);
     }
 
-    // === HELPER METHODS FOR CONFIG VALUES ===
     private BigDecimal getWinLimitValue() {
         return BigDecimal.valueOf(tradingConfig.winLimit());
     }
-
 }
