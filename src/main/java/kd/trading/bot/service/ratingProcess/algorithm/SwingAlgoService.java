@@ -26,6 +26,7 @@ public class SwingAlgoService {
 
     public CoinAnalysis analyzeCoin(String symbol, double lastPrice) {
         try {
+            /**
             // === HUNGARIAN TIME CHECK ===
             ZonedDateTime hungarianTime = ZonedDateTime.now(ZoneId.of("Europe/Budapest"));
             LocalTime currentTime = hungarianTime.toLocalTime();
@@ -34,7 +35,7 @@ public class SwingAlgoService {
             boolean isNightTime = currentTime.isAfter(LocalTime.of(20, 0)) ||
                     currentTime.isBefore(LocalTime.of(6, 0));
 
-
+            */
             // Get 4H and daily data for better swing analysis
             List<List<Object>> fourHourKlines = restClient.getKlines(symbol, "4h", 300);
             List<List<Object>> dailyKlines = restClient.getKlines(symbol, "1d", 200);
@@ -151,13 +152,12 @@ public class SwingAlgoService {
             // === SIGNAL DECISION WITH FLEXIBLE CRITERIA ===
             Signal signal = Signal.NO_TRADE;
 
-            // LONG signals - High confidence setups
-            if (score >= 7.0 && primaryUptrend && macdBullish && strongVolume && goodVolatility) {
-                signal = isNightTime ? Signal.LONG : Signal.SHORT;
-            }
-            // SHORT signals - You can adjust this threshold to get more/fewer SHORT signals
-            else if (score <= -6.0 && primaryDowntrend && macdBearish && goodVolatility) {
-                signal = isNightTime ? Signal.SHORT : Signal.SHORT;
+            if (primaryDowntrend && macdBearish && goodVolatility) {
+                if (score >= -6.5 && score <= -5.0) {
+                    signal = Signal.SHORT;
+                } else if (score >= -12.0 && score <= -8.0) {
+                    signal = Signal.LONG;
+                }
             }
             // NO_TRADE for everything else (most cases will be NO_TRADE for safety)
 
