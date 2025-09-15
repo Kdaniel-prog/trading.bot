@@ -152,6 +152,10 @@ public class SwingAlgoService {
             // === SIGNAL DECISION WITH FLEXIBLE CRITERIA ===
             Signal signal = Signal.NO_TRADE;
 
+            if (score >= 7.0 && primaryUptrend && macdBullish && strongVolume && goodVolatility) { //ez egésznap marad short
+                signal = Signal.SHORT;
+            }
+
             if (primaryDowntrend && macdBearish && goodVolatility) {
                 if (score >= -6.5 && score <= -5.0) {
                     signal = Signal.SHORT;
