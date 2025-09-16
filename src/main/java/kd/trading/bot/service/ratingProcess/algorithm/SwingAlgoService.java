@@ -413,7 +413,7 @@ public class SwingAlgoService {
                 (trend.getPrimaryTrend().equals("BULLISH") ||
                         trend.getShortTermTrend().equals("BULLISH")) && // OR helyett AND
                 momentum.isMacdBullish()) { // resistance check eltávolítva
-            return Signal.LONG;
+            return Signal.SHORT;
         }
 
         // OPTIMALIZÁLT: Enyhébb short feltételek
@@ -421,7 +421,7 @@ public class SwingAlgoService {
                 (trend.getPrimaryTrend().equals("BEARISH") ||
                         trend.getShortTermTrend().equals("BEARISH")) && // OR helyett AND
                 momentum.isMacdBearish()) { // support check eltávolítva
-            return Signal.SHORT;
+            return Signal.LONG;
         }
 
         // ÚJ: Momentum-based belépés (gyorsabb reagálás)
@@ -430,7 +430,7 @@ public class SwingAlgoService {
                 momentum.isMacdBullish() &&
                 momentum.isRsiRising() &&
                 risk.getRiskRewardRatio() >= 1.3) {
-            return Signal.LONG;
+            return Signal.SHORT;
         }
 
         if (shortScore <= -3.0 &&
@@ -438,7 +438,7 @@ public class SwingAlgoService {
                 momentum.isMacdBearish() &&
                 !momentum.isRsiRising() &&
                 risk.getRiskRewardRatio() >= 1.3) {
-            return Signal.SHORT;
+            return Signal.LONG;
         }
 
         // ÚJ: Volume breakout alapú belépés
@@ -446,14 +446,14 @@ public class SwingAlgoService {
                 momentum.isRsiBullishZone() &&
                 risk.isGoodShortTermVolatility() &&
                 volume.isVolumeBreakout()) {
-            return Signal.LONG;
+            return Signal.SHORT;
         }
 
         if (shortScore <= -2.5 &&
                 momentum.isRsiBearishZone() &&
                 risk.isGoodShortTermVolatility() &&
                 volume.isVolumeBreakout()) {
-            return Signal.SHORT;
+            return Signal.LONG;
         }
 
         // Counter-trend opportunities (recovery trades) - MEGTARTVA
@@ -461,14 +461,14 @@ public class SwingAlgoService {
                 trend.getPrimaryTrend().equals("BULLISH") &&
                 momentum.isRsiOversold() &&
                 risk.getRiskRewardRatio() >= 2.0) { // 2.5 → 2.0
-            return Signal.LONG;
+            return Signal.SHORT;
         }
 
         if (shortScore <= -4.0 &&
                 trend.getPrimaryTrend().equals("BEARISH") &&
                 momentum.isRsiOverbought() &&
                 risk.getRiskRewardRatio() >= 2.0) { // 2.5 → 2.0
-            return Signal.SHORT;
+            return Signal.LONG;
         }
 
         return Signal.NO_TRADE;
