@@ -115,21 +115,21 @@ public class TradeService {
 
         restClient.changeLeverage(coinAnalysis.getSymbol());
 
-        /**
+
         restClient.placeMarketOrder(
              coinAnalysis.getSymbol(),
              trade.getQuantity(),
              coinAnalysis.getSignal()
         );
-         */
 
+        /**
         restClient.placeOrder(
                 coinAnalysis.getSymbol(),
                 trade.getQuantity(),
                 trade.getEntryPrice(),
                 coinAnalysis.getSignal()
         );
-
+         */
     }
 
     public Integer getListSize() {
