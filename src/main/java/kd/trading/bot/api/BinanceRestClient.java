@@ -7,6 +7,7 @@ import kd.trading.bot.config.binance.BinanceConfig;
 import kd.trading.bot.config.trading.TradingConfig;
 import kd.trading.bot.enums.Signal;
 import kd.trading.bot.model.ExchangeInfo;
+import kd.trading.bot.model.OrderBookInfo;
 import kd.trading.bot.model.OrderDto;
 import kd.trading.bot.model.SymbolInfo;
 import kd.trading.bot.util.MessageParser;
@@ -29,10 +30,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
@@ -45,6 +44,92 @@ public class BinanceRestClient {
     SignatureUtil util;
     TradingConfig tradingConfig;
     MessageParser parser;
+    Map<String, CachedOrderBook> liquidityCache = new ConcurrentHashMap<>();
+    static long CACHE_TTL = 300_000; // 5 minutes
+
+    /**
+     * Order book adatok lekérése liquidity check-hez
+     */
+    public Optional<OrderBookInfo> getOrderBookForLiquidity(String symbol) {
+        try {
+            // Cache check
+            CachedOrderBook cached = liquidityCache.get(symbol);
+            if (cached != null && !cached.isExpired()) {
+                return Optional.of(cached.orderBook);
+            }
+
+            String url = config.restBaseUrl() + "/fapi/v1/depth?symbol=" + symbol + "&limit=10";
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(java.time.Duration.ofSeconds(3))
+                    .GET()
+                    .build();
+
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() != 200) {
+                return Optional.empty();
+            }
+
+            OrderBookInfo orderBook = parseSimpleOrderBook(response.body(), symbol);
+            liquidityCache.put(symbol, new CachedOrderBook(orderBook, System.currentTimeMillis()));
+
+            return Optional.of(orderBook);
+
+        } catch (Exception e) {
+            log.debug("Failed to get order book for {}: {}", symbol, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Simple order book parsing csak a liquidity check-hez
+     */
+    private OrderBookInfo parseSimpleOrderBook(String responseBody, String symbol) {
+        try {
+            JsonNode root = mapper.readTree(responseBody);
+            JsonNode bids = root.get("bids");
+            JsonNode asks = root.get("asks");
+
+            if (bids == null || asks == null || bids.isEmpty() || asks.isEmpty()) {
+                throw new RuntimeException("Empty order book");
+            }
+
+            double bestBid = bids.get(0).get(0).asDouble();
+            double bestAsk = asks.get(0).get(0).asDouble();
+            double spread = ((bestAsk - bestBid) / bestBid) * 100;
+
+            // Calculate depth (top 5 levels each side)
+            double totalDepth = 0;
+            for (int i = 0; i < Math.min(5, bids.size()); i++) {
+                totalDepth += bids.get(i).get(0).asDouble() * bids.get(i).get(1).asDouble();
+            }
+            for (int i = 0; i < Math.min(5, asks.size()); i++) {
+                totalDepth += asks.get(i).get(0).asDouble() * asks.get(i).get(1).asDouble();
+            }
+
+            return new OrderBookInfo(symbol, spread, totalDepth);
+
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to parse order book: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Cache cleanup
+     */
+    public void cleanupLiquidityCache() {
+        long now = System.currentTimeMillis();
+        liquidityCache.entrySet().removeIf(entry -> entry.getValue().isExpired());
+    }
+
+    // Simple data classes
+    private record CachedOrderBook(OrderBookInfo orderBook, long timestamp) {
+        boolean isExpired() {
+            return (System.currentTimeMillis() - timestamp) > CACHE_TTL;
+        }
+    }
 
     public List<SymbolInfo> getBinanceTradableSymbols() {
         try {

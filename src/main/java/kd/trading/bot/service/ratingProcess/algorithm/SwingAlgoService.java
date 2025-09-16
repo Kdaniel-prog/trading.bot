@@ -2,7 +2,7 @@ package kd.trading.bot.service.ratingProcess.algorithm;
 
 import kd.trading.bot.api.BinanceRestClient;
 import kd.trading.bot.enums.Signal;
-import kd.trading.bot.model.CoinAnalysis;
+import kd.trading.bot.model.*;
 import kd.trading.bot.util.IndicatorUtil;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
@@ -24,151 +24,66 @@ public class SwingAlgoService {
     BinanceRestClient restClient;
     IndicatorUtil indicatorUtil;
 
+    // Constants for 3x leverage trading
+    private static final double MIN_LONG_SCORE = 6.0;
+    private static final double MIN_SHORT_SCORE = -6.0;
+    private static final double RISK_REWARD_RATIO = 2.0; // 6% profit vs 3% loss
+
     public CoinAnalysis analyzeCoin(String symbol, double lastPrice) {
         try {
-            /**
-            // === HUNGARIAN TIME CHECK ===
-            ZonedDateTime hungarianTime = ZonedDateTime.now(ZoneId.of("Europe/Budapest"));
-            LocalTime currentTime = hungarianTime.toLocalTime();
-
-            // Check if current time is between 20:00 (8 PM) and 06:00 (6 AM) next day
-            boolean isNightTime = currentTime.isAfter(LocalTime.of(20, 0)) ||
-                    currentTime.isBefore(LocalTime.of(6, 0));
-
-            */
-            // Get 4H and daily data for better swing analysis
+            // Get multi-timeframe data
             List<List<Object>> fourHourKlines = restClient.getKlines(symbol, "4h", 300);
             List<List<Object>> dailyKlines = restClient.getKlines(symbol, "1d", 200);
+            List<List<Object>> hourlyKlines = restClient.getKlines(symbol, "1h", 100);
 
             if (fourHourKlines.size() < 100 || dailyKlines.size() < 50) {
                 return new CoinAnalysis(symbol, 0.0, Signal.NO_TRADE, 0.0);
             }
 
             // Extract price data
-            List<Double> closes4h = fourHourKlines.stream()
-                    .map(k -> Double.parseDouble(k.get(4).toString()))
-                    .toList();
-
-            List<Double> highs4h = fourHourKlines.stream()
-                    .map(k -> Double.parseDouble(k.get(2).toString()))
-                    .toList();
-
-            List<Double> lows4h = fourHourKlines.stream()
-                    .map(k -> Double.parseDouble(k.get(3).toString()))
-                    .toList();
-
-            List<Double> volumes4h = fourHourKlines.stream()
-                    .map(k -> Double.parseDouble(k.get(5).toString()))
-                    .toList();
-
-            List<Double> closesDaily = dailyKlines.stream()
-                    .map(k -> Double.parseDouble(k.get(4).toString()))
-                    .toList();
+            List<Double> closes4h = extractCloses(fourHourKlines);
+            List<Double> highs4h = extractHighs(fourHourKlines);
+            List<Double> lows4h = extractLows(fourHourKlines);
+            List<Double> volumes4h = extractVolumes(fourHourKlines);
+            List<Double> closesDaily = extractCloses(dailyKlines);
+            List<Double> closesHourly = extractCloses(hourlyKlines);
 
             double currentPrice = closes4h.get(closes4h.size() - 1);
 
-            // === PRIMARY TREND ANALYSIS ===
-            double ema20_4h = indicatorUtil.EMA(closes4h, 20);
-            double ema50_4h = indicatorUtil.EMA(closes4h, 50);
-            double ema200_daily = indicatorUtil.EMA(closesDaily, 200);
-
-            boolean primaryUptrend = currentPrice > ema200_daily && ema20_4h > ema50_4h;
-            boolean primaryDowntrend = currentPrice < ema200_daily && ema20_4h < ema50_4h;
+            // === TREND ANALYSIS (Multi-timeframe) ===
+            TrendAnalysis trendAnalysis = analyzeTrends(closes4h, closesDaily, closesHourly, currentPrice);
 
             // === MOMENTUM ANALYSIS ===
-            double rsi4h = indicatorUtil.RSI(closes4h, 14);
-            double[] macd4h = indicatorUtil.MACD(closes4h, 12, 26, 9);
-            double macdLine = macd4h[0];
-            double macdSignal = macd4h[1];
-            double macdHist = macd4h[2];
-
-            // MACD momentum conditions
-            boolean macdBullish = macdLine > macdSignal && macdHist > 0;
-            boolean macdBearish = macdLine < macdSignal && macdHist < 0;
-
-            // RSI conditions for entry
-            boolean rsiBullishEntry = rsi4h > 45 && rsi4h < 65; // Not oversold/overbought
-            boolean rsiBearishEntry = rsi4h > 35 && rsi4h < 55;
+            MomentumAnalysis momentumAnalysis = analyzeMomentum(closes4h);
 
             // === VOLUME ANALYSIS ===
-            double avgVolume20 = volumes4h.subList(volumes4h.size() - 20, volumes4h.size())
-                    .stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
-            double currentVolume = volumes4h.get(volumes4h.size() - 1);
-            boolean strongVolume = currentVolume > 1.3 * avgVolume20;
+            VolumeAnalysis volumeAnalysis = analyzeVolume(volumes4h);
 
-            // === SUPPORT/RESISTANCE LEVELS ===
-            double[] srLevels = indicatorUtil.calculateSupportResistance(highs4h, lows4h, closes4h);
-            double nearestSupport = srLevels[0];
-            double nearestResistance = srLevels[1];
-
-            // Distance from S/R levels (risk management)
-            double distanceFromSupport = (currentPrice - nearestSupport) / currentPrice * 100;
-            double distanceFromResistance = (nearestResistance - currentPrice) / currentPrice * 100;
-
-            // === VOLATILITY FILTER ===
-            double atr = indicatorUtil.calculateATR(highs4h, lows4h, closes4h, 14);
-            double volatilityPct = (atr / currentPrice) * 100;
-            boolean goodVolatility = volatilityPct > 2.0 && volatilityPct < 8.0; // 2-8% volatility
+            // === SUPPORT/RESISTANCE & RISK MANAGEMENT ===
+            RiskAnalysis riskAnalysis = analyzeRisk(highs4h, lows4h, closes4h, currentPrice);
 
             // === MARKET STRUCTURE ===
-            boolean higherHighs = indicatorUtil.isHigherHighsPattern(highs4h, 10);
-            boolean lowerLows = indicatorUtil.isLowerLowsPattern(lows4h, 10);
+            StructureAnalysis structureAnalysis = analyzeMarketStructure(highs4h, lows4h, closes4h);
 
-            // === SCORING SYSTEM ===
-            double score = 0.0;
+            // === COMPREHENSIVE SCORING ===
+            double longScore = calculateLongScore(trendAnalysis, momentumAnalysis,
+                    volumeAnalysis, riskAnalysis, structureAnalysis);
+            double shortScore = calculateShortScore(trendAnalysis, momentumAnalysis,
+                    volumeAnalysis, riskAnalysis, structureAnalysis);
 
-            // Primary trend (most important)
-            if (primaryUptrend) score += 4.0;
-            if (primaryDowntrend) score -= 4.0;
+            // === SIGNAL DECISION ===
+            Signal signal = determineSignal(longScore, shortScore, trendAnalysis,
+                    momentumAnalysis, riskAnalysis);
 
-            // Momentum alignment
-            if (macdBullish && rsiBullishEntry) score += 3.0;
-            if (macdBearish && rsiBearishEntry) score -= 3.0;
+            double finalScore = signal == Signal.LONG ? longScore :
+                    signal == Signal.SHORT ? shortScore : 0.0;
 
-            // Market structure
-            if (higherHighs) score += 2.0;
-            if (lowerLows) score -= 2.0;
+            log.info("Analysis for {}: LongScore={}, ShortScore={}, Signal={}, " +
+                            "Trend={}, RSI={}, RiskReward={}",
+                    symbol, longScore, shortScore, signal,
+                    trendAnalysis.getPrimaryTrend(), momentumAnalysis.getRsi(), riskAnalysis.getRiskRewardRatio());
 
-            // Volume confirmation
-            if (strongVolume) score += 1.5;
-
-            // Volatility filter
-            if (goodVolatility) score += 1.0;
-            else score -= 2.0; // Penalize low/extreme volatility
-
-            // Risk/Reward based on S/R levels
-            if (distanceFromSupport > 2.0 && distanceFromSupport < 8.0) score += 1.5; // Good distance from support
-            if (distanceFromResistance > 3.0) score += 1.0; // Room to move up
-            if (distanceFromResistance < 1.5) score -= 2.0; // Too close to resistance
-
-            // Additional filters to reduce false signals
-            if (rsi4h > 75 || rsi4h < 25) score -= 3.0; // Avoid extreme RSI
-
-            // Trend consistency check
-            double ema10_4h = indicatorUtil.EMA(closes4h, 10);
-            if (primaryUptrend && ema10_4h > ema20_4h && ema20_4h > ema50_4h) score += 1.5;
-            if (primaryDowntrend && ema10_4h < ema20_4h && ema20_4h < ema50_4h) score -= 1.5;
-
-            // === SIGNAL DECISION WITH FLEXIBLE CRITERIA ===
-            Signal signal = Signal.NO_TRADE;
-
-            if (score >= 7.0 && primaryUptrend && macdBullish && strongVolume && goodVolatility) { //ez egésznap marad short
-                signal = Signal.SHORT;
-            }
-
-            if (primaryDowntrend && macdBearish && goodVolatility) {
-                if (score >= -6.0 && score <= -5.0) {
-                    signal = Signal.SHORT;
-                } else if (score >= -12.0 && score <= -8.0) {
-                    signal = Signal.LONG;
-                }
-            }
-            // NO_TRADE for everything else (most cases will be NO_TRADE for safety)
-
-            log.debug("Analysis for {}: Score={}, RSI={}, MACD={}, Volume={}, ATR%={}",
-                    symbol, score, rsi4h, macdLine, currentVolume/avgVolume20, volatilityPct);
-
-            return new CoinAnalysis(symbol, score, signal, lastPrice);
+            return new CoinAnalysis(symbol, finalScore, signal, lastPrice);
 
         } catch (Exception e) {
             log.error("Failed to analyze swing coin {}", symbol, e);
@@ -176,4 +91,327 @@ public class SwingAlgoService {
         }
     }
 
+    private VolumeAnalysis analyzeVolume(List<Double> volumes4h) {
+        double currentVolume = volumes4h.get(volumes4h.size() - 1);
+        double avgVolume20 = volumes4h.subList(volumes4h.size() - 20, volumes4h.size())
+                .stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
+        double avgVolume50 = volumes4h.subList(Math.max(0, volumes4h.size() - 50), volumes4h.size())
+                .stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
+
+        double volumeRatio = avgVolume20 > 0 ? currentVolume / avgVolume20 : 0.0;
+        boolean strongVolume = volumeRatio > 1.5;
+        boolean strongBullishVolume = volumeRatio > 2.0;
+        boolean strongBearishVolume = volumeRatio > 1.8;
+        boolean aboveAverageVolume = volumeRatio > 1.0;
+
+        // Calculate volume percentile (last 50 periods)
+        List<Double> recentVolumes = volumes4h.subList(Math.max(0, volumes4h.size() - 50), volumes4h.size());
+        long belowCurrent = recentVolumes.stream().mapToLong(v -> v < currentVolume ? 1 : 0).sum();
+        double volumePercentile = (double) belowCurrent / recentVolumes.size() * 100;
+
+        boolean volumeBreakout = volumePercentile > 80;
+        boolean volumeDrying = volumeRatio < 0.6;
+
+        return VolumeAnalysis.builder()
+                .currentVolume(currentVolume)
+                .averageVolume20(avgVolume20)
+                .volumeRatio(volumeRatio)
+                .strongVolume(strongVolume)
+                .strongBullishVolume(strongBullishVolume)
+                .strongBearishVolume(strongBearishVolume)
+                .aboveAverageVolume(aboveAverageVolume)
+                .volumePercentile(volumePercentile)
+                .volumeBreakout(volumeBreakout)
+                .volumeDrying(volumeDrying)
+                .build();
+    }
+
+    private RiskAnalysis analyzeRisk(List<Double> highs4h, List<Double> lows4h,
+                                     List<Double> closes4h, double currentPrice) {
+        double[] srLevels = indicatorUtil.calculateSupportResistance(highs4h, lows4h, closes4h);
+        double nearestSupport = srLevels[0];
+        double nearestResistance = srLevels[1];
+
+        double distanceFromSupport = (currentPrice - nearestSupport) / currentPrice * 100;
+        double distanceFromResistance = (nearestResistance - currentPrice) / currentPrice * 100;
+
+        double atr = indicatorUtil.calculateATR(highs4h, lows4h, closes4h, 14);
+        double volatilityPercent = (atr / currentPrice) * 100;
+        boolean goodVolatility = volatilityPercent > 2.0 && volatilityPercent < 8.0;
+
+        boolean nearSupport = distanceFromSupport < 2.0;
+        boolean nearResistance = distanceFromResistance < 2.0;
+
+        // Risk/Reward calculation for 3x leverage (6% profit target, 3% stop loss)
+        double riskRewardRatio = 0.0;
+        if (distanceFromSupport > 1.0) {
+            riskRewardRatio = distanceFromResistance / distanceFromSupport;
+        }
+
+        boolean optimalRiskReward = riskRewardRatio >= RISK_REWARD_RATIO;
+        boolean highRisk = volatilityPercent > 10.0 || nearSupport || nearResistance;
+
+        // Stop loss and take profit levels
+        double stopLossLevel = currentPrice - (atr * 1.5); // 1.5 ATR stop loss
+        double takeProfitLevel = currentPrice + (atr * 3.0); // 3 ATR take profit
+
+        return RiskAnalysis.builder()
+                .nearestSupport(nearestSupport)
+                .nearestResistance(nearestResistance)
+                .distanceFromSupport(distanceFromSupport)
+                .distanceFromResistance(distanceFromResistance)
+                .riskRewardRatio(riskRewardRatio)
+                .atr(atr)
+                .volatilityPercent(volatilityPercent)
+                .goodVolatility(goodVolatility)
+                .nearSupport(nearSupport)
+                .nearResistance(nearResistance)
+                .highRisk(highRisk)
+                .optimalRiskReward(optimalRiskReward)
+                .stopLossLevel(stopLossLevel)
+                .takeProfitLevel(takeProfitLevel)
+                .build();
+    }
+
+    private StructureAnalysis analyzeMarketStructure(List<Double> highs4h, List<Double> lows4h,
+                                                     List<Double> closes4h) {
+        boolean higherHighs = indicatorUtil.isHigherHighsPattern(highs4h, 10);
+        boolean lowerLows = indicatorUtil.isLowerLowsPattern(lows4h, 10);
+        boolean higherLows = indicatorUtil.isHigherLowsPattern(lows4h, 10);
+        boolean lowerHighs = indicatorUtil.isLowerHighsPattern(highs4h, 10);
+
+        boolean bullishPattern = higherHighs && higherLows;
+        boolean bearishPattern = lowerLows && lowerHighs;
+        boolean consolidation = !higherHighs && !lowerLows && !higherLows && !lowerHighs;
+
+        String marketStructure = "SIDEWAYS";
+        if (bullishPattern) {
+            marketStructure = "UPTREND";
+        } else if (bearishPattern) {
+            marketStructure = "DOWNTREND";
+        }
+
+        // Structure strength calculation
+        double structureStrength = 0.0;
+        if (bullishPattern) structureStrength = (higherHighs ? 1.0 : 0.0) + (higherLows ? 1.0 : 0.0);
+        if (bearishPattern) structureStrength = (lowerLows ? 1.0 : 0.0) + (lowerHighs ? 1.0 : 0.0);
+
+        boolean breakoutPattern = indicatorUtil.isBreakoutPattern(highs4h, lows4h, closes4h);
+        boolean reversalPattern = indicatorUtil.isReversalPattern(highs4h, lows4h, closes4h);
+        boolean structureBreak = indicatorUtil.isStructureBreak(highs4h, lows4h, closes4h);
+
+        return StructureAnalysis.builder()
+                .higherHighs(higherHighs)
+                .lowerLows(lowerLows)
+                .higherLows(higherLows)
+                .lowerHighs(lowerHighs)
+                .bullishPattern(bullishPattern)
+                .bearishPattern(bearishPattern)
+                .consolidation(consolidation)
+                .breakoutPattern(breakoutPattern)
+                .reversalPattern(reversalPattern)
+                .marketStructure(marketStructure)
+                .structureStrength(structureStrength)
+                .structureBreak(structureBreak)
+                .build();
+    }
+
+    private TrendAnalysis analyzeTrends(List<Double> closes4h, List<Double> closesDaily,
+                                        List<Double> closesHourly, double currentPrice) {
+        double ema20_4h = indicatorUtil.EMA(closes4h, 20);
+        double ema50_4h = indicatorUtil.EMA(closes4h, 50);
+        double ema200_daily = indicatorUtil.EMA(closesDaily, 200);
+        double ema10_1h = indicatorUtil.EMA(closesHourly, 10);
+        double ema20_1h = indicatorUtil.EMA(closesHourly, 20);
+
+        String primaryTrend = "NEUTRAL";
+        String shortTermTrend = "NEUTRAL";
+
+        // Primary trend (daily timeframe)
+        if (currentPrice > ema200_daily && ema20_4h > ema50_4h) {
+            primaryTrend = "BULLISH";
+        } else if (currentPrice < ema200_daily && ema20_4h < ema50_4h) {
+            primaryTrend = "BEARISH";
+        }
+
+        // Short-term trend (hourly)
+        if (ema10_1h > ema20_1h && currentPrice > ema10_1h) {
+            shortTermTrend = "BULLISH";
+        } else if (ema10_1h < ema20_1h && currentPrice < ema10_1h) {
+            shortTermTrend = "BEARISH";
+        }
+
+        boolean trendAlignment = primaryTrend.equals(shortTermTrend) && !primaryTrend.equals("NEUTRAL");
+
+        return TrendAnalysis.builder()
+                .primaryTrend(primaryTrend)
+                .shortTermTrend(shortTermTrend)
+                .trendAlignment(trendAlignment)
+                .ema20_4h(ema20_4h)
+                .ema50_4h(ema50_4h)
+                .ema200_daily(ema200_daily)
+                .build();
+    }
+
+    private MomentumAnalysis analyzeMomentum(List<Double> closes4h) {
+        double rsi = indicatorUtil.RSI(closes4h, 14);
+        double[] macd = indicatorUtil.MACD(closes4h, 12, 26, 9);
+        double macdLine = macd[0];
+        double macdSignal = macd[1];
+        double macdHist = macd[2];
+
+        boolean macdBullish = macdLine > macdSignal && macdHist > 0;
+        boolean macdBearish = macdLine < macdSignal && macdHist < 0;
+
+        // RSI levels optimized for swing trading with 3x leverage
+        boolean rsiBullishZone = rsi > 40 && rsi < 70; // Not oversold/overbought
+        boolean rsiBearishZone = rsi > 30 && rsi < 60;
+        boolean rsiOversold = rsi < 35;
+        boolean rsiOverbought = rsi > 65;
+
+        return MomentumAnalysis.builder()
+                .rsi(rsi)
+                .macdBullish(macdBullish)
+                .macdBearish(macdBearish)
+                .rsiBullishZone(rsiBullishZone)
+                .rsiBearishZone(rsiBearishZone)
+                .rsiOversold(rsiOversold)
+                .rsiOverbought(rsiOverbought)
+                .build();
+    }
+
+    private double calculateLongScore(TrendAnalysis trend, MomentumAnalysis momentum,
+                                      VolumeAnalysis volume, RiskAnalysis risk,
+                                      StructureAnalysis structure) {
+        double score = 0.0;
+
+        // Trend factors (40% weight)
+        if (trend.getPrimaryTrend().equals("BULLISH")) score += 4.0;
+        if (trend.getShortTermTrend().equals("BULLISH")) score += 2.0;
+        if (trend.isTrendAlignment() && trend.getPrimaryTrend().equals("BULLISH")) score += 2.0;
+
+        // Momentum factors (30% weight)
+        if (momentum.isMacdBullish() && momentum.isRsiBullishZone()) score += 3.0;
+        if (momentum.isRsiOversold()) score += 2.0; // Bounce opportunity
+        if (momentum.isRsiOverbought()) score -= 3.0; // Avoid overbought
+
+        // Structure factors (15% weight)
+        if (structure.isHigherHighs()) score += 1.5;
+        if (structure.isBullishPattern()) score += 1.0;
+
+        // Volume confirmation (10% weight)
+        if (volume.isStrongBullishVolume()) score += 1.0;
+
+        // Risk management (5% weight)
+        if (risk.getRiskRewardRatio() >= RISK_REWARD_RATIO) score += 1.0;
+        if (risk.isNearResistance()) score -= 2.0;
+        if (risk.isGoodVolatility()) score += 0.5;
+
+        return score;
+    }
+
+    private double calculateShortScore(TrendAnalysis trend, MomentumAnalysis momentum,
+                                       VolumeAnalysis volume, RiskAnalysis risk,
+                                       StructureAnalysis structure) {
+        double score = 0.0;
+
+        // Trend factors (40% weight)
+        if (trend.getPrimaryTrend().equals("BEARISH")) score -= 4.0;
+        if (trend.getShortTermTrend().equals("BEARISH")) score -= 2.0;
+        if (trend.isTrendAlignment() && trend.getPrimaryTrend().equals("BEARISH")) score -= 2.0;
+
+        // Momentum factors (30% weight)
+        if (momentum.isMacdBearish() && momentum.isRsiBearishZone()) score -= 3.0;
+        if (momentum.isRsiOverbought()) score -= 2.0; // Reversal opportunity
+        if (momentum.isRsiOversold()) score += 3.0; // Avoid oversold bounce
+
+        // Structure factors (15% weight)
+        if (structure.isLowerLows()) score -= 1.5;
+        if (structure.isBearishPattern()) score -= 1.0;
+
+        // Volume confirmation (10% weight)
+        if (volume.isStrongBearishVolume()) score -= 1.0;
+
+        // Risk management (5% weight)
+        if (risk.getRiskRewardRatio() >= RISK_REWARD_RATIO) score -= 1.0;
+        if (risk.isNearSupport()) score += 2.0;
+        if (risk.isGoodVolatility()) score -= 0.5;
+
+        return score;
+    }
+
+    private Signal determineSignal(double longScore, double shortScore,
+                                   TrendAnalysis trend, MomentumAnalysis momentum,
+                                   RiskAnalysis risk) {
+
+        // Safety filters - avoid extreme market conditions
+        if (!risk.isGoodVolatility() || risk.getRiskRewardRatio() < 1.5) {
+            return Signal.NO_TRADE;
+        }
+
+        // Avoid trading during momentum extremes
+        if (momentum.isRsiOverbought() && momentum.isRsiOversold()) {
+            return Signal.NO_TRADE;
+        }
+
+        // Long signal conditions
+        if (longScore >= MIN_LONG_SCORE &&
+                trend.getPrimaryTrend().equals("BULLISH") &&
+                momentum.isMacdBullish() &&
+                !risk.isNearResistance()) {
+            return Signal.LONG;
+        }
+
+        // Short signal conditions
+        if (shortScore <= MIN_SHORT_SCORE &&
+                trend.getPrimaryTrend().equals("BEARISH") &&
+                momentum.isMacdBearish() &&
+                !risk.isNearSupport()) {
+            return Signal.SHORT;
+        }
+
+        // Counter-trend opportunities (recovery trades)
+        // Long on oversold in strong uptrend
+        if (longScore >= 4.0 &&
+                trend.getPrimaryTrend().equals("BULLISH") &&
+                momentum.isRsiOversold() &&
+                risk.getRiskRewardRatio() >= 2.5) {
+            return Signal.LONG;
+        }
+
+        // Short on overbought in strong downtrend
+        if (shortScore <= -4.0 &&
+                trend.getPrimaryTrend().equals("BEARISH") &&
+                momentum.isRsiOverbought() &&
+                risk.getRiskRewardRatio() >= 2.5) {
+            return Signal.SHORT;
+        }
+
+        return Signal.NO_TRADE;
+    }
+
+    // Extract methods for cleaner code
+    private List<Double> extractCloses(List<List<Object>> klines) {
+        return klines.stream()
+                .map(k -> Double.parseDouble(k.get(4).toString()))
+                .toList();
+    }
+
+    private List<Double> extractHighs(List<List<Object>> klines) {
+        return klines.stream()
+                .map(k -> Double.parseDouble(k.get(2).toString()))
+                .toList();
+    }
+
+    private List<Double> extractLows(List<List<Object>> klines) {
+        return klines.stream()
+                .map(k -> Double.parseDouble(k.get(3).toString()))
+                .toList();
+    }
+
+    private List<Double> extractVolumes(List<List<Object>> klines) {
+        return klines.stream()
+                .map(k -> Double.parseDouble(k.get(5).toString()))
+                .toList();
+    }
 }

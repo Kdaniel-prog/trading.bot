@@ -24,7 +24,7 @@ public class RankingService {
         // TOP 5
         List<CoinAnalysis> top = sorted.stream()
                 .filter(t -> t.getSignal() != Signal.SHORT)
-                .limit(5)
+                .limit(3)
                 .toList();
 
         // BOTTOM 5, de csak azok, akik nincsenek a topban
@@ -36,7 +36,7 @@ public class RankingService {
                 .filter(t -> t.getSignal() != Signal.LONG)
                 .filter(c -> !topSymbols.contains(c.getSymbol())) // szűrés
                 .sorted((a, b) -> Double.compare(a.getScore(), b.getScore())) // növekvő score bottomhoz
-                .limit(5)
+                .limit(3)
                 .toList();
 
         return new RankedCoins(top, bottom);
