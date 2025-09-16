@@ -25,9 +25,9 @@ public class SwingAlgoService {
     IndicatorUtil indicatorUtil;
 
     // Constants for 3x leverage trading
-    private static final double MIN_LONG_SCORE = 6.0;
-    private static final double MIN_SHORT_SCORE = -6.0;
-    private static final double RISK_REWARD_RATIO = 2.0; // 6% profit vs 3% loss
+    static double MIN_LONG_SCORE = 6.0;
+    static double MIN_SHORT_SCORE = -6.0;
+    static double RISK_REWARD_RATIO = 2.0; // 6% profit vs 3% loss
 
     public CoinAnalysis analyzeCoin(String symbol, double lastPrice) {
         try {
