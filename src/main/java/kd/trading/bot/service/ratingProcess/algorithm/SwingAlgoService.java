@@ -15,7 +15,6 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.List;
 
-
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -25,17 +24,18 @@ public class SwingAlgoService {
     BinanceRestClient restClient;
     IndicatorUtil indicatorUtil;
 
-    // Constants for 3x leverage trading
-    static double MIN_LONG_SCORE = 6.0;
-    static double MIN_SHORT_SCORE = -6.0;
-    static double RISK_REWARD_RATIO = 2.0; // 6% profit vs 3% loss
+    // OPTIMALIZÁLT Constants for 3x leverage trading
+    static double MIN_LONG_SCORE = 4.0;   // 6.0 → 4.0 (Több signal)
+    static double MIN_SHORT_SCORE = -4.0; // -6.0 → -4.0
+    static double RISK_REWARD_RATIO = 1.5; // 2.0 → 1.5 (Lazább követelmény)
 
     public CoinAnalysis analyzeCoin(String symbol, double lastPrice) {
         try {
-            // Get multi-timeframe data
+            // Get multi-timeframe data + 15m for volatility
             List<List<Object>> fourHourKlines = restClient.getKlines(symbol, "4h", 300);
             List<List<Object>> dailyKlines = restClient.getKlines(symbol, "1d", 200);
             List<List<Object>> hourlyKlines = restClient.getKlines(symbol, "1h", 100);
+            List<List<Object>> fifteenMinKlines = restClient.getKlines(symbol, "15m", 50);
 
             if (fourHourKlines.size() < 100 || dailyKlines.size() < 50) {
                 return new CoinAnalysis(symbol, 0.0, Signal.NO_TRADE, 0.0);
@@ -49,6 +49,11 @@ public class SwingAlgoService {
             List<Double> closesDaily = extractCloses(dailyKlines);
             List<Double> closesHourly = extractCloses(hourlyKlines);
 
+            // ÚJ: 15m data a gyorsabb volatilitás méréshez
+            List<Double> closes15m = extractCloses(fifteenMinKlines);
+            List<Double> highs15m = extractHighs(fifteenMinKlines);
+            List<Double> lows15m = extractLows(fifteenMinKlines);
+
             double currentPrice = closes4h.get(closes4h.size() - 1);
 
             // === TREND ANALYSIS (Multi-timeframe) ===
@@ -61,7 +66,8 @@ public class SwingAlgoService {
             VolumeAnalysis volumeAnalysis = analyzeVolume(volumes4h);
 
             // === SUPPORT/RESISTANCE & RISK MANAGEMENT ===
-            RiskAnalysis riskAnalysis = analyzeRisk(highs4h, lows4h, closes4h, currentPrice);
+            RiskAnalysis riskAnalysis = analyzeRisk(highs4h, lows4h, closes4h,
+                    highs15m, lows15m, closes15m, currentPrice);
 
             // === MARKET STRUCTURE ===
             StructureAnalysis structureAnalysis = analyzeMarketStructure(highs4h, lows4h, closes4h);
@@ -74,15 +80,16 @@ public class SwingAlgoService {
 
             // === SIGNAL DECISION ===
             Signal signal = determineSignal(longScore, shortScore, trendAnalysis,
-                    momentumAnalysis, riskAnalysis);
+                    momentumAnalysis, riskAnalysis, volumeAnalysis);
 
             double finalScore = signal == Signal.LONG ? longScore :
                     signal == Signal.SHORT ? shortScore : 0.0;
 
             log.info("Analysis for {}: LongScore={}, ShortScore={}, Signal={}, " +
-                            "Trend={}, RSI={}, RiskReward={}",
+                            "Trend={}, RSI={}, RiskReward={}, Vol15m={}",
                     symbol, longScore, shortScore, signal,
-                    trendAnalysis.getPrimaryTrend(), momentumAnalysis.getRsi(), riskAnalysis.getRiskRewardRatio());
+                    trendAnalysis.getPrimaryTrend(), momentumAnalysis.getRsi(),
+                    riskAnalysis.getRiskRewardRatio(), riskAnalysis.getShortTermVolatility());
 
             return new CoinAnalysis(symbol, finalScore, signal, lastPrice);
 
@@ -100,18 +107,24 @@ public class SwingAlgoService {
                 .stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
 
         double volumeRatio = avgVolume20 > 0 ? currentVolume / avgVolume20 : 0.0;
-        boolean strongVolume = volumeRatio > 1.5;
-        boolean strongBullishVolume = volumeRatio > 2.0;
-        boolean strongBearishVolume = volumeRatio > 1.8;
-        boolean aboveAverageVolume = volumeRatio > 1.0;
+        boolean strongVolume = volumeRatio > 1.3; // 1.5 → 1.3 (Lazább)
+        boolean strongBullishVolume = volumeRatio > 1.8; // 2.0 → 1.8
+        boolean strongBearishVolume = volumeRatio > 1.5; // 1.8 → 1.5
+        boolean aboveAverageVolume = volumeRatio > 0.8; // 1.0 → 0.8
 
         // Calculate volume percentile (last 50 periods)
         List<Double> recentVolumes = volumes4h.subList(Math.max(0, volumes4h.size() - 50), volumes4h.size());
         long belowCurrent = recentVolumes.stream().mapToLong(v -> v < currentVolume ? 1 : 0).sum();
         double volumePercentile = (double) belowCurrent / recentVolumes.size() * 100;
 
-        boolean volumeBreakout = volumePercentile > 80;
-        boolean volumeDrying = volumeRatio < 0.6;
+        boolean volumeBreakout = volumePercentile > 75; // 80 → 75
+        boolean volumeDrying = volumeRatio < 0.7; // 0.6 → 0.7
+
+        // ÚJ: Volume trend az utolsó 5 gyertyán
+        List<Double> last5Volumes = volumes4h.subList(volumes4h.size() - 5, volumes4h.size());
+        boolean volumeTrendUp = last5Volumes.get(4) > last5Volumes.get(0);
+        double volumeSlope = (last5Volumes.get(4) - last5Volumes.get(0)) / 4.0;
+        boolean volumeMomentum = Math.abs(volumeSlope) > avgVolume20 * 0.1;
 
         return VolumeAnalysis.builder()
                 .currentVolume(currentVolume)
@@ -124,11 +137,15 @@ public class SwingAlgoService {
                 .volumePercentile(volumePercentile)
                 .volumeBreakout(volumeBreakout)
                 .volumeDrying(volumeDrying)
+                .volumeTrendUp(volumeTrendUp) // ÚJ
+                .volumeMomentum(volumeMomentum) // ÚJ
                 .build();
     }
 
     private RiskAnalysis analyzeRisk(List<Double> highs4h, List<Double> lows4h,
-                                     List<Double> closes4h, double currentPrice) {
+                                     List<Double> closes4h, List<Double> highs15m,
+                                     List<Double> lows15m, List<Double> closes15m,
+                                     double currentPrice) {
         double[] srLevels = indicatorUtil.calculateSupportResistance(highs4h, lows4h, closes4h);
         double nearestSupport = srLevels[0];
         double nearestResistance = srLevels[1];
@@ -136,25 +153,33 @@ public class SwingAlgoService {
         double distanceFromSupport = (currentPrice - nearestSupport) / currentPrice * 100;
         double distanceFromResistance = (nearestResistance - currentPrice) / currentPrice * 100;
 
+        // 4h ATR
         double atr = indicatorUtil.calculateATR(highs4h, lows4h, closes4h, 14);
         double volatilityPercent = (atr / currentPrice) * 100;
-        boolean goodVolatility = volatilityPercent > 2.0 && volatilityPercent < 8.0;
 
-        boolean nearSupport = distanceFromSupport < 2.0;
-        boolean nearResistance = distanceFromResistance < 2.0;
+        // ÚJ: 15m ATR gyorsabb volatilitás méréshez
+        double atr15m = indicatorUtil.calculateATR(highs15m, lows15m, closes15m, 14);
+        double shortTermVolatility = (atr15m / currentPrice) * 100;
 
-        // Risk/Reward calculation for 3x leverage (6% profit target, 3% stop loss)
+        // OPTIMALIZÁLT: Lazább volatilitás küszöbök
+        boolean goodVolatility = volatilityPercent > 1.0 && volatilityPercent < 12.0; // 2.0-8.0 → 1.0-12.0
+        boolean goodShortTermVolatility = shortTermVolatility > 0.5 && shortTermVolatility < 8.0;
+
+        boolean nearSupport = distanceFromSupport < 2.5; // 2.0 → 2.5
+        boolean nearResistance = distanceFromResistance < 2.5; // 2.0 → 2.5
+
+        // Risk/Reward calculation for 3x leverage
         double riskRewardRatio = 0.0;
-        if (distanceFromSupport > 1.0) {
+        if (distanceFromSupport > 0.8) { // 1.0 → 0.8 (Lazább)
             riskRewardRatio = distanceFromResistance / distanceFromSupport;
         }
 
         boolean optimalRiskReward = riskRewardRatio >= RISK_REWARD_RATIO;
-        boolean highRisk = volatilityPercent > 10.0 || nearSupport || nearResistance;
+        boolean highRisk = volatilityPercent > 15.0 || (nearSupport && nearResistance); // 10.0 → 15.0
 
         // Stop loss and take profit levels
-        double stopLossLevel = currentPrice - (atr * 1.5); // 1.5 ATR stop loss
-        double takeProfitLevel = currentPrice + (atr * 3.0); // 3 ATR take profit
+        double stopLossLevel = currentPrice - (atr * 1.5);
+        double takeProfitLevel = currentPrice + (atr * 3.0);
 
         return RiskAnalysis.builder()
                 .nearestSupport(nearestSupport)
@@ -164,7 +189,9 @@ public class SwingAlgoService {
                 .riskRewardRatio(riskRewardRatio)
                 .atr(atr)
                 .volatilityPercent(volatilityPercent)
+                .shortTermVolatility(shortTermVolatility) // ÚJ
                 .goodVolatility(goodVolatility)
+                .goodShortTermVolatility(goodShortTermVolatility) // ÚJ
                 .nearSupport(nearSupport)
                 .nearResistance(nearResistance)
                 .highRisk(highRisk)
@@ -176,10 +203,11 @@ public class SwingAlgoService {
 
     private StructureAnalysis analyzeMarketStructure(List<Double> highs4h, List<Double> lows4h,
                                                      List<Double> closes4h) {
-        boolean higherHighs = indicatorUtil.isHigherHighsPattern(highs4h, 10);
-        boolean lowerLows = indicatorUtil.isLowerLowsPattern(lows4h, 10);
-        boolean higherLows = indicatorUtil.isHigherLowsPattern(lows4h, 10);
-        boolean lowerHighs = indicatorUtil.isLowerHighsPattern(highs4h, 10);
+        // OPTIMALIZÁLT: Rövidebb lookback period gyorsabb reagáláshoz
+        boolean higherHighs = indicatorUtil.isHigherHighsPattern(highs4h, 8); // 10 → 8
+        boolean lowerLows = indicatorUtil.isLowerLowsPattern(lows4h, 8); // 10 → 8
+        boolean higherLows = indicatorUtil.isHigherLowsPattern(lows4h, 8); // 10 → 8
+        boolean lowerHighs = indicatorUtil.isLowerHighsPattern(highs4h, 8); // 10 → 8
 
         boolean bullishPattern = higherHighs && higherLows;
         boolean bearishPattern = lowerLows && lowerHighs;
@@ -228,26 +256,35 @@ public class SwingAlgoService {
         String primaryTrend = "NEUTRAL";
         String shortTermTrend = "NEUTRAL";
 
-        // Primary trend (daily timeframe)
-        if (currentPrice > ema200_daily && ema20_4h > ema50_4h) {
+        // OPTIMALIZÁLT: Lazább trend meghatározás
+        if (currentPrice > ema200_daily * 0.98 && ema20_4h > ema50_4h * 0.995) { // Kis tolerancia
             primaryTrend = "BULLISH";
-        } else if (currentPrice < ema200_daily && ema20_4h < ema50_4h) {
+        } else if (currentPrice < ema200_daily * 1.02 && ema20_4h < ema50_4h * 1.005) {
             primaryTrend = "BEARISH";
         }
 
         // Short-term trend (hourly)
-        if (ema10_1h > ema20_1h && currentPrice > ema10_1h) {
+        if (ema10_1h > ema20_1h && currentPrice > ema10_1h * 0.99) { // Kis tolerancia
             shortTermTrend = "BULLISH";
-        } else if (ema10_1h < ema20_1h && currentPrice < ema10_1h) {
+        } else if (ema10_1h < ema20_1h && currentPrice < ema10_1h * 1.01) {
             shortTermTrend = "BEARISH";
         }
 
         boolean trendAlignment = primaryTrend.equals(shortTermTrend) && !primaryTrend.equals("NEUTRAL");
 
+        // ÚJ: Trend erősség kalkuláció
+        double trendStrength = 0.0;
+        if (primaryTrend.equals("BULLISH")) {
+            trendStrength = (currentPrice - ema200_daily) / ema200_daily * 100;
+        } else if (primaryTrend.equals("BEARISH")) {
+            trendStrength = (ema200_daily - currentPrice) / ema200_daily * 100;
+        }
+
         return TrendAnalysis.builder()
                 .primaryTrend(primaryTrend)
                 .shortTermTrend(shortTermTrend)
                 .trendAlignment(trendAlignment)
+                .trendStrength(trendStrength) // ÚJ
                 .ema20_4h(ema20_4h)
                 .ema50_4h(ema50_4h)
                 .ema200_daily(ema200_daily)
@@ -264,11 +301,16 @@ public class SwingAlgoService {
         boolean macdBullish = macdLine > macdSignal && macdHist > 0;
         boolean macdBearish = macdLine < macdSignal && macdHist < 0;
 
-        // RSI levels optimized for swing trading with 3x leverage
-        boolean rsiBullishZone = rsi > 40 && rsi < 70; // Not oversold/overbought
-        boolean rsiBearishZone = rsi > 30 && rsi < 60;
-        boolean rsiOversold = rsi < 35;
-        boolean rsiOverbought = rsi > 65;
+        // OPTIMALIZÁLT: Szélesebb RSI zónák több signal-ért
+        boolean rsiBullishZone = rsi > 30 && rsi < 75; // 40-70 → 30-75
+        boolean rsiBearishZone = rsi > 25 && rsi < 70; // 30-60 → 25-70
+        boolean rsiOversold = rsi < 30; // 35 → 30
+        boolean rsiOverbought = rsi > 70; // 65 → 70
+
+        // ÚJ: RSI momentum (változás irány)
+        List<Double> recentCloses = closes4h.subList(closes4h.size() - 5, closes4h.size());
+        double rsi5PeriodsAgo = indicatorUtil.RSI(recentCloses.subList(0, 4), 14);
+        boolean rsiRising = rsi > rsi5PeriodsAgo;
 
         return MomentumAnalysis.builder()
                 .rsi(rsi)
@@ -278,6 +320,7 @@ public class SwingAlgoService {
                 .rsiBearishZone(rsiBearishZone)
                 .rsiOversold(rsiOversold)
                 .rsiOverbought(rsiOverbought)
+                .rsiRising(rsiRising) // ÚJ
                 .build();
     }
 
@@ -286,27 +329,33 @@ public class SwingAlgoService {
                                       StructureAnalysis structure) {
         double score = 0.0;
 
-        // Trend factors (40% weight)
-        if (trend.getPrimaryTrend().equals("BULLISH")) score += 4.0;
-        if (trend.getShortTermTrend().equals("BULLISH")) score += 2.0;
-        if (trend.isTrendAlignment() && trend.getPrimaryTrend().equals("BULLISH")) score += 2.0;
+        // OPTIMALIZÁLT: Trend factors (35% weight, csökkentve 40%-ról)
+        if (trend.getPrimaryTrend().equals("BULLISH")) score += 3.0; // 4.0 → 3.0
+        if (trend.getShortTermTrend().equals("BULLISH")) score += 1.8; // 2.0 → 1.8
+        if (trend.isTrendAlignment() && trend.getPrimaryTrend().equals("BULLISH")) score += 1.5; // 2.0 → 1.5
+        if (trend.getTrendStrength() > 5.0) score += 0.5; // ÚJ: Erős trend bonus
 
-        // Momentum factors (30% weight)
-        if (momentum.isMacdBullish() && momentum.isRsiBullishZone()) score += 3.0;
-        if (momentum.isRsiOversold()) score += 2.0; // Bounce opportunity
-        if (momentum.isRsiOverbought()) score -= 3.0; // Avoid overbought
+        // OPTIMALIZÁLT: Momentum factors (35% weight, növelve 30%-ról)
+        if (momentum.isMacdBullish() && momentum.isRsiBullishZone()) score += 2.5; // 3.0 → 2.5
+        if (momentum.isRsiOversold()) score += 1.5; // 2.0 → 1.5
+        if (momentum.isRsiOverbought()) score -= 2.0; // 3.0 → 2.0
+        if (momentum.isRsiRising() && momentum.isRsiBullishZone()) score += 0.8; // ÚJ
 
-        // Structure factors (15% weight)
-        if (structure.isHigherHighs()) score += 1.5;
+        // OPTIMALIZÁLT: Structure factors (15% weight)
+        if (structure.isHigherHighs()) score += 1.0; // 1.5 → 1.0
         if (structure.isBullishPattern()) score += 1.0;
+        if (structure.isBreakoutPattern()) score += 0.8; // ÚJ
 
-        // Volume confirmation (10% weight)
-        if (volume.isStrongBullishVolume()) score += 1.0;
+        // OPTIMALIZÁLT: Volume confirmation (15% weight, növelve 10%-ről)
+        if (volume.isStrongBullishVolume()) score += 1.2; // 1.0 → 1.2
+        if (volume.isVolumeBreakout()) score += 1.0; // ÚJ
+        if (volume.isVolumeTrendUp()) score += 0.5; // ÚJ
+        if (volume.isVolumeMomentum()) score += 0.3; // ÚJ
 
-        // Risk management (5% weight)
-        if (risk.getRiskRewardRatio() >= RISK_REWARD_RATIO) score += 1.0;
-        if (risk.isNearResistance()) score -= 2.0;
-        if (risk.isGoodVolatility()) score += 0.5;
+        // Risk management - kevésbé szigorú
+        if (risk.getRiskRewardRatio() >= 1.5) score += 0.5; // RISK_REWARD_RATIO használat
+        if (risk.isGoodVolatility() || risk.isGoodShortTermVolatility()) score += 0.5;
+        if (risk.isNearResistance()) score -= 1.0; // 2.0 → 1.0 (Kevésbé büntető)
 
         return score;
     }
@@ -316,75 +365,109 @@ public class SwingAlgoService {
                                        StructureAnalysis structure) {
         double score = 0.0;
 
-        // Trend factors (40% weight)
-        if (trend.getPrimaryTrend().equals("BEARISH")) score -= 4.0;
-        if (trend.getShortTermTrend().equals("BEARISH")) score -= 2.0;
-        if (trend.isTrendAlignment() && trend.getPrimaryTrend().equals("BEARISH")) score -= 2.0;
+        // OPTIMALIZÁLT: Trend factors (35% weight)
+        if (trend.getPrimaryTrend().equals("BEARISH")) score -= 3.0; // 4.0 → 3.0
+        if (trend.getShortTermTrend().equals("BEARISH")) score -= 1.8; // 2.0 → 1.8
+        if (trend.isTrendAlignment() && trend.getPrimaryTrend().equals("BEARISH")) score -= 1.5; // 2.0 → 1.5
+        if (trend.getTrendStrength() > 5.0) score -= 0.5; // ÚJ: Erős trend bonus
 
-        // Momentum factors (30% weight)
-        if (momentum.isMacdBearish() && momentum.isRsiBearishZone()) score -= 3.0;
-        if (momentum.isRsiOverbought()) score -= 2.0; // Reversal opportunity
-        if (momentum.isRsiOversold()) score += 3.0; // Avoid oversold bounce
+        // OPTIMALIZÁLT: Momentum factors (35% weight)
+        if (momentum.isMacdBearish() && momentum.isRsiBearishZone()) score -= 2.5; // 3.0 → 2.5
+        if (momentum.isRsiOverbought()) score -= 1.5; // 2.0 → 1.5
+        if (momentum.isRsiOversold()) score += 2.0; // 3.0 → 2.0
+        if (!momentum.isRsiRising() && momentum.isRsiBearishZone()) score -= 0.8; // ÚJ
 
-        // Structure factors (15% weight)
-        if (structure.isLowerLows()) score -= 1.5;
+        // OPTIMALIZÁLT: Structure factors (15% weight)
+        if (structure.isLowerLows()) score -= 1.0; // 1.5 → 1.0
         if (structure.isBearishPattern()) score -= 1.0;
+        if (structure.isBreakoutPattern()) score -= 0.8; // ÚJ
 
-        // Volume confirmation (10% weight)
-        if (volume.isStrongBearishVolume()) score -= 1.0;
+        // OPTIMALIZÁLT: Volume confirmation (15% weight)
+        if (volume.isStrongBearishVolume()) score -= 1.2; // 1.0 → 1.2
+        if (volume.isVolumeBreakout()) score -= 1.0; // ÚJ
+        if (!volume.isVolumeTrendUp()) score -= 0.5; // ÚJ
+        if (volume.isVolumeMomentum()) score -= 0.3; // ÚJ
 
-        // Risk management (5% weight)
-        if (risk.getRiskRewardRatio() >= RISK_REWARD_RATIO) score -= 1.0;
-        if (risk.isNearSupport()) score += 2.0;
-        if (risk.isGoodVolatility()) score -= 0.5;
+        // Risk management - kevésbé szigorú
+        if (risk.getRiskRewardRatio() >= 1.5) score -= 0.5; // RISK_REWARD_RATIO használat
+        if (risk.isGoodVolatility() || risk.isGoodShortTermVolatility()) score -= 0.5;
+        if (risk.isNearSupport()) score += 1.0; // 2.0 → 1.0 (Kevésbé büntető)
 
         return score;
     }
 
     private Signal determineSignal(double longScore, double shortScore,
                                    TrendAnalysis trend, MomentumAnalysis momentum,
-                                   RiskAnalysis risk) {
+                                   RiskAnalysis risk, VolumeAnalysis volume) {
 
-        // Safety filters - avoid extreme market conditions
-        if (!risk.isGoodVolatility() || risk.getRiskRewardRatio() < 1.5) {
+        // OPTIMALIZÁLT: Lazább safety filters
+        if (risk.getRiskRewardRatio() < 1.2) { // 1.5 → 1.2
             return Signal.NO_TRADE;
         }
 
-        // Avoid trading during momentum extremes
-        if (momentum.isRsiOverbought() && momentum.isRsiOversold()) {
-            return Signal.NO_TRADE;
-        }
+        // ELTÁVOLÍTVA: Volatilitás szűrő (túl szigorú volt)
+        // if (!risk.isGoodVolatility()) return Signal.NO_TRADE;
 
-        // Long signal conditions
+        // OPTIMALIZÁLT: Enyhébb long feltételek
         if (longScore >= MIN_LONG_SCORE &&
-                trend.getPrimaryTrend().equals("BULLISH") &&
-                momentum.isMacdBullish() &&
-                !risk.isNearResistance()) {
+                (trend.getPrimaryTrend().equals("BULLISH") ||
+                        trend.getShortTermTrend().equals("BULLISH")) && // OR helyett AND
+                momentum.isMacdBullish()) { // resistance check eltávolítva
             return Signal.LONG;
         }
 
-        // Short signal conditions
+        // OPTIMALIZÁLT: Enyhébb short feltételek
         if (shortScore <= MIN_SHORT_SCORE &&
-                trend.getPrimaryTrend().equals("BEARISH") &&
-                momentum.isMacdBearish() &&
-                !risk.isNearSupport()) {
+                (trend.getPrimaryTrend().equals("BEARISH") ||
+                        trend.getShortTermTrend().equals("BEARISH")) && // OR helyett AND
+                momentum.isMacdBearish()) { // support check eltávolítva
             return Signal.SHORT;
         }
 
-        // Counter-trend opportunities (recovery trades)
-        // Long on oversold in strong uptrend
-        if (longScore >= 4.0 &&
-                trend.getPrimaryTrend().equals("BULLISH") &&
-                momentum.isRsiOversold() &&
-                risk.getRiskRewardRatio() >= 2.5) {
+        // ÚJ: Momentum-based belépés (gyorsabb reagálás)
+        if (longScore >= 3.0 &&
+                momentum.isRsiBullishZone() &&
+                momentum.isMacdBullish() &&
+                momentum.isRsiRising() &&
+                risk.getRiskRewardRatio() >= 1.3) {
             return Signal.LONG;
         }
 
-        // Short on overbought in strong downtrend
+        if (shortScore <= -3.0 &&
+                momentum.isRsiBearishZone() &&
+                momentum.isMacdBearish() &&
+                !momentum.isRsiRising() &&
+                risk.getRiskRewardRatio() >= 1.3) {
+            return Signal.SHORT;
+        }
+
+        // ÚJ: Volume breakout alapú belépés
+        if (longScore >= 2.5 &&
+                momentum.isRsiBullishZone() &&
+                risk.isGoodShortTermVolatility() &&
+                volume.isVolumeBreakout()) {
+            return Signal.LONG;
+        }
+
+        if (shortScore <= -2.5 &&
+                momentum.isRsiBearishZone() &&
+                risk.isGoodShortTermVolatility() &&
+                volume.isVolumeBreakout()) {
+            return Signal.SHORT;
+        }
+
+        // Counter-trend opportunities (recovery trades) - MEGTARTVA
+        if (longScore >= 4.0 &&
+                trend.getPrimaryTrend().equals("BULLISH") &&
+                momentum.isRsiOversold() &&
+                risk.getRiskRewardRatio() >= 2.0) { // 2.5 → 2.0
+            return Signal.LONG;
+        }
+
         if (shortScore <= -4.0 &&
                 trend.getPrimaryTrend().equals("BEARISH") &&
                 momentum.isRsiOverbought() &&
-                risk.getRiskRewardRatio() >= 2.5) {
+                risk.getRiskRewardRatio() >= 2.0) { // 2.5 → 2.0
             return Signal.SHORT;
         }
 

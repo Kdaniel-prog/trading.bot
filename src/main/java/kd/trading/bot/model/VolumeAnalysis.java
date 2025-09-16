@@ -13,6 +13,8 @@ import lombok.experimental.FieldDefaults;
 public class VolumeAnalysis {
 
     double currentVolume;
+    boolean volumeTrendUp;
+    boolean volumeMomentum;
     double averageVolume20;
     double volumeRatio;
     boolean strongVolume;

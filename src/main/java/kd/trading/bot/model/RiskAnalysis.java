@@ -13,7 +13,9 @@ import lombok.experimental.FieldDefaults;
 public class RiskAnalysis {
 
     double nearestSupport;
+    double shortTermVolatility;
     double nearestResistance;
+    boolean goodShortTermVolatility;
     double distanceFromSupport;
     double distanceFromResistance;
     double riskRewardRatio;

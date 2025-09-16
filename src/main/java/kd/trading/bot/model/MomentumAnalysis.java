@@ -13,6 +13,7 @@ public class MomentumAnalysis {
     boolean macdBearish;
     boolean rsiBullishZone;
     boolean rsiBearishZone;
+    boolean rsiRising;
     boolean rsiOversold;
     boolean rsiOverbought;
 }
