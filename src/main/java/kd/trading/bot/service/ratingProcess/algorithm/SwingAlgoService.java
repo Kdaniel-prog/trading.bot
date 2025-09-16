@@ -433,6 +433,7 @@ public class SwingAlgoService {
             return Signal.SHORT;
         }
 
+        //ez jó
         if (shortScore <= -3.0 &&
                 momentum.isRsiBearishZone() &&
                 momentum.isMacdBearish() &&
@@ -441,6 +442,7 @@ public class SwingAlgoService {
             return Signal.LONG;
         }
 
+        //vagy ez
         // ÚJ: Volume breakout alapú belépés
         if (longScore >= 2.5 &&
                 momentum.isRsiBullishZone() &&

@@ -140,19 +140,23 @@ public class TradeDecisionService {
         return createDecision(TradeAction.HOLD, order, "No significant decline detected");
     }
 
+
     /**
-     * Check for profit decline after 40 minutes
-     */
+     * Check for profit decline after 30 minutes - IMPROVED VERSION
+     * */
     private TradeDecision evaluateProfitDeclineAtXMin(OrderDto order, BigDecimal currentPnl, Duration openDuration) {
         long minutes = openDuration.toMinutes();
 
-        // Using loseOneThird for force exit threshold (1/3 of stop limit)
-        BigDecimal forceExitThreshold = loseOneThird;
+        // Thresholds
+        BigDecimal forceExitThreshold = loseOneThird; // pl. 0.5%
         BigDecimal zeroThreshold = BigDecimal.ZERO;
-        // Using winOneThird for small profit threshold
-        BigDecimal smallProfitThreshold = winOneThird.divide(DIVIDE_BY_TWO, RoundingMode.HALF_UP);
+        BigDecimal smallProfitThreshold = winOneThird.divide(DIVIDE_BY_TWO, RoundingMode.HALF_UP); // pl. 0.25%
 
-        // Only check after 40 minutes
+        // JAVÍTÁS: Minimális decline küszöbök
+        BigDecimal minSignificantDecline = new BigDecimal("0.15"); // legalább 0.15% csökkenés kell
+        BigDecimal minSmallProfitDecline = new BigDecimal("0.30"); // kis profithoz nagyobb csökkenés kell
+
+        // Only check after 30 minutes
         if (minutes < PROFIT_DECLINE_CHECK_MINUTES) {
             return createDecision(TradeAction.HOLD, order, "Not yet 30 minutes");
         }
@@ -163,20 +167,49 @@ public class TradeDecisionService {
         if (currentPnl.compareTo(zeroThreshold) > 0 && lastWin.compareTo(currentPnl) > 0) {
             BigDecimal decline = lastWin.subtract(currentPnl);
 
-            // If profit declined by more than threshold from peak after 40+ minutes
-            if (decline.compareTo(forceExitThreshold) >= 0) {
-                log.info("📉 {}-MIN PROFIT DECLINE detected for {} - Peak: {}%, Current: {}%, Decline: {}%",
-                        PROFIT_DECLINE_CHECK_MINUTES, order.getSymbol(), lastWin, currentPnl, decline);
-                return createDecision(TradeAction.CLOSE, order,
-                        String.format("%s-MIN DECLINE: Peak %.2f%% → Current %.2f%%", PROFIT_DECLINE_CHECK_MINUTES, lastWin, currentPnl));
+            // JAVÍTÁS: Relative decline számítás (százalékban a peak-hez képest)
+            BigDecimal relativeDecline = decline.divide(lastWin, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100"));
+
+            // NAGY PROFIT ESETÉN: Szigorúbb feltételek
+            if (lastWin.compareTo(new BigDecimal("2.0")) >= 0) { // Ha peak > 2%
+                // Legalább 20% relatív csökkenés VAGY 0.5% abszolút csökkenés
+                if (relativeDecline.compareTo(new BigDecimal("20")) >= 0 && decline.compareTo(forceExitThreshold) >= 0) {
+                    log.info("📉 {}-MIN LARGE PROFIT DECLINE detected for {} - Peak: {}%, Current: {}%, Relative Decline: {}%",
+                            PROFIT_DECLINE_CHECK_MINUTES, order.getSymbol(), lastWin, currentPnl, relativeDecline);
+                    return createDecision(TradeAction.CLOSE, order,
+                            String.format("%s-MIN LARGE DECLINE: Peak %.2f%% → Current %.2f%% (-%s%%)",
+                                    PROFIT_DECLINE_CHECK_MINUTES, lastWin, currentPnl, relativeDecline));
+                }
             }
 
-            // Even smaller decline threshold for very small profits (fontos)
-            if (currentPnl.compareTo(smallProfitThreshold) >= 0) {
-                log.info("📉 {}-MIN SMALL PROFIT DECLINE for {} - Peak: {}%, Current: {}%",
-                        PROFIT_DECLINE_CHECK_MINUTES, order.getSymbol(), lastWin, currentPnl);
-                return createDecision(TradeAction.CLOSE, order,
-                        String.format("%s-MIN SMALL DECLINE: Peak %.2f%% → Current %.2f%%",PROFIT_DECLINE_CHECK_MINUTES, lastWin, currentPnl));
+            // KÖZEPES PROFIT ESETÉN: (0.5% - 2.0%)
+            else if (lastWin.compareTo(smallProfitThreshold.multiply(new BigDecimal("2"))) >= 0) {
+                // Legalább 25% relatív csökkenés ÉS minimum 0.3% abszolút csökkenés
+                if (relativeDecline.compareTo(new BigDecimal("25")) >= 0 && decline.compareTo(minSmallProfitDecline) >= 0) {
+                    log.info("📉 {}-MIN MEDIUM PROFIT DECLINE detected for {} - Peak: {}%, Current: {}%, Relative Decline: {}%",
+                            PROFIT_DECLINE_CHECK_MINUTES, order.getSymbol(), lastWin, currentPnl, relativeDecline);
+                    return createDecision(TradeAction.CLOSE, order,
+                            String.format("%s-MIN MEDIUM DECLINE: Peak %.2f%% → Current %.2f%% (-%s%%)",
+                                    PROFIT_DECLINE_CHECK_MINUTES, lastWin, currentPnl, relativeDecline));
+                }
+            }
+
+            // KIS PROFIT ESETÉN: Még szigorúbb feltételek
+            else if (currentPnl.compareTo(smallProfitThreshold) >= 0) {
+                // Legalább 40% relatív csökkenés ÉS minimum 0.15% abszolút csökkenés
+                if (relativeDecline.compareTo(new BigDecimal("40")) >= 0 && decline.compareTo(minSignificantDecline) >= 0) {
+                    log.info("📉 {}-MIN SMALL PROFIT DECLINE for {} - Peak: {}%, Current: {}%, Relative Decline: {}%",
+                            PROFIT_DECLINE_CHECK_MINUTES, order.getSymbol(), lastWin, currentPnl, relativeDecline);
+                    return createDecision(TradeAction.CLOSE, order,
+                            String.format("%s-MIN SMALL DECLINE: Peak %.2f%% → Current %.2f%% (-%s%%)",
+                                    PROFIT_DECLINE_CHECK_MINUTES, lastWin, currentPnl, relativeDecline));
+                }
+            }
+
+            // JAVÍTÁS: Csak log, ha nincs close
+            if (decline.compareTo(minSignificantDecline.divide(new BigDecimal("3"), RoundingMode.HALF_UP)) >= 0) {
+                log.debug("📊 {}-MIN Minor decline for {} - Peak: {}%, Current: {}%, Decline: {}% (holding)",
+                        PROFIT_DECLINE_CHECK_MINUTES, order.getSymbol(), lastWin, currentPnl, decline);
             }
         }
 
