@@ -431,7 +431,7 @@ public class SwingAlgoService {
                         trend.getShortTermTrend().equals("BULLISH")) && // OR helyett AND
                 momentum.isMacdBullish()) { // resistance check eltávolítva
             trend.setRule(1);
-            return Signal.SHORT;
+            return Signal.LONG;
         }
 
         // OPTIMALIZÁLT: Enyhébb short feltételek
@@ -470,7 +470,7 @@ public class SwingAlgoService {
                 risk.isGoodShortTermVolatility() &&
                 volume.isVolumeBreakout()) {
             trend.setRule(5);
-            return Signal.SHORT;
+            return Signal.LONG;
         }
 
         if (shortScore <= -2.5 &&
