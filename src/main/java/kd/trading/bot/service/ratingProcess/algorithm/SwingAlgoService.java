@@ -3,13 +3,11 @@ package kd.trading.bot.service.ratingProcess.algorithm;
 import kd.trading.bot.api.BinanceRestClient;
 import kd.trading.bot.enums.Signal;
 import kd.trading.bot.model.*;
-import kd.trading.bot.telegram.eventType.TradeClosedUpdateEvent;
 import kd.trading.bot.util.IndicatorUtil;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalTime;
@@ -25,7 +23,6 @@ public class SwingAlgoService {
 
     BinanceRestClient restClient;
     IndicatorUtil indicatorUtil;
-    ApplicationEventPublisher publisher;
 
     // OPTIMALIZÁLT Constants for 3x leverage trading
     static double MIN_LONG_SCORE = 4.0;   // 6.0 → 4.0 (Több signal)
@@ -89,20 +86,11 @@ public class SwingAlgoService {
                     signal == Signal.SHORT ? shortScore : 0.0;
 
             log.info("Analysis for {}: LongScore={}, ShortScore={}, Signal={}, " +
-                            "Trend={}, RSI={}, RiskReward={}, Vol15m={} Rule={}",
+                            "Trend={}, RSI={}, RiskReward={}, Vol15m={}",
                     symbol, longScore, shortScore, signal,
                     trendAnalysis.getPrimaryTrend(), momentumAnalysis.getRsi(),
-                    riskAnalysis.getRiskRewardRatio(),
-                    riskAnalysis.getShortTermVolatility(), trendAnalysis.getRule());
-            if (trendAnalysis.getRule() > 0){
-                String logMessage = String.format("Analysis for %s: LongScore=%s, ShortScore=%s, Signal=%s, " +
-                                "Trend=%s, RSI=%s, RiskReward=%s, Vol15m=%s Rule=%s",
-                        symbol, longScore, shortScore, signal,
-                        trendAnalysis.getPrimaryTrend(), momentumAnalysis.getRsi(),
-                        riskAnalysis.getRiskRewardRatio(),
-                        riskAnalysis.getShortTermVolatility(), trendAnalysis.getRule());
-                tradeWithRule(logMessage);
-            }
+                    riskAnalysis.getRiskRewardRatio(), riskAnalysis.getShortTermVolatility());
+
             return new CoinAnalysis(symbol, finalScore, signal, lastPrice);
 
         } catch (Exception e) {
@@ -412,7 +400,6 @@ public class SwingAlgoService {
                                    TrendAnalysis trend, MomentumAnalysis momentum,
                                    RiskAnalysis risk, VolumeAnalysis volume) {
 
-        trend.setRule(0);
         // OPTIMALIZÁLT: Lazább safety filters
         if (risk.getRiskRewardRatio() < 1.2) { // 1.5 → 1.2
             return Signal.NO_TRADE;
@@ -426,7 +413,6 @@ public class SwingAlgoService {
                 (trend.getPrimaryTrend().equals("BULLISH") ||
                         trend.getShortTermTrend().equals("BULLISH")) && // OR helyett AND
                 momentum.isMacdBullish()) { // resistance check eltávolítva
-            trend.setRule(1);
             return Signal.LONG;
         }
 
@@ -435,7 +421,6 @@ public class SwingAlgoService {
                 (trend.getPrimaryTrend().equals("BEARISH") ||
                         trend.getShortTermTrend().equals("BEARISH")) && // OR helyett AND
                 momentum.isMacdBearish()) { // support check eltávolítva
-            trend.setRule(2);
             return Signal.SHORT;
         }
 
@@ -445,7 +430,6 @@ public class SwingAlgoService {
                 momentum.isMacdBullish() &&
                 momentum.isRsiRising() &&
                 risk.getRiskRewardRatio() >= 1.3) {
-            trend.setRule(3);
             return Signal.LONG;
         }
 
@@ -454,7 +438,6 @@ public class SwingAlgoService {
                 momentum.isMacdBearish() &&
                 !momentum.isRsiRising() &&
                 risk.getRiskRewardRatio() >= 1.3) {
-            trend.setRule(4);
             return Signal.SHORT;
         }
 
@@ -463,7 +446,6 @@ public class SwingAlgoService {
                 momentum.isRsiBullishZone() &&
                 risk.isGoodShortTermVolatility() &&
                 volume.isVolumeBreakout()) {
-            trend.setRule(5);
             return Signal.LONG;
         }
 
@@ -471,7 +453,6 @@ public class SwingAlgoService {
                 momentum.isRsiBearishZone() &&
                 risk.isGoodShortTermVolatility() &&
                 volume.isVolumeBreakout()) {
-            trend.setRule(6);
             return Signal.SHORT;
         }
 
@@ -480,7 +461,6 @@ public class SwingAlgoService {
                 trend.getPrimaryTrend().equals("BULLISH") &&
                 momentum.isRsiOversold() &&
                 risk.getRiskRewardRatio() >= 2.0) { // 2.5 → 2.0
-            trend.setRule(7);
             return Signal.LONG;
         }
 
@@ -488,7 +468,6 @@ public class SwingAlgoService {
                 trend.getPrimaryTrend().equals("BEARISH") &&
                 momentum.isRsiOverbought() &&
                 risk.getRiskRewardRatio() >= 2.0) { // 2.5 → 2.0
-            trend.setRule(8);
             return Signal.SHORT;
         }
 
@@ -518,9 +497,5 @@ public class SwingAlgoService {
         return klines.stream()
                 .map(k -> Double.parseDouble(k.get(5).toString()))
                 .toList();
-    }
-
-    public void tradeWithRule(String message) {
-        publisher.publishEvent(new TradeClosedUpdateEvent(this, message));
     }
 }
