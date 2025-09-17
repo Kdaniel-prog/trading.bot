@@ -6,7 +6,8 @@ import lombok.experimental.FieldDefaults;
 @Data
 @Builder
 @AllArgsConstructor
-@FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
+@Setter
+@FieldDefaults(level = AccessLevel.PRIVATE)
 public class TrendAnalysis {
     String primaryTrend;
     String shortTermTrend;
@@ -15,4 +16,6 @@ public class TrendAnalysis {
     double ema20_4h;
     double ema50_4h;
     double ema200_daily;
+    @Builder.Default
+    int rule = 0;
 }
