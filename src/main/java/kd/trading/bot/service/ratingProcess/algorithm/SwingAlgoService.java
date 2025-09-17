@@ -3,11 +3,13 @@ package kd.trading.bot.service.ratingProcess.algorithm;
 import kd.trading.bot.api.BinanceRestClient;
 import kd.trading.bot.enums.Signal;
 import kd.trading.bot.model.*;
+import kd.trading.bot.telegram.eventType.TradeClosedUpdateEvent;
 import kd.trading.bot.util.IndicatorUtil;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalTime;
@@ -23,6 +25,7 @@ public class SwingAlgoService {
 
     BinanceRestClient restClient;
     IndicatorUtil indicatorUtil;
+    ApplicationEventPublisher publisher;
 
     // OPTIMALIZÁLT Constants for 3x leverage trading
     static double MIN_LONG_SCORE = 4.0;   // 6.0 → 4.0 (Több signal)
@@ -86,17 +89,30 @@ public class SwingAlgoService {
                     signal == Signal.SHORT ? shortScore : 0.0;
 
             log.info("Analysis for {}: LongScore={}, ShortScore={}, Signal={}, " +
-                            "Trend={}, RSI={}, RiskReward={}, Vol15m={}",
+                            "Trend={}, RSI={}, RiskReward={}, Vol15m={} Rule={}",
                     symbol, longScore, shortScore, signal,
                     trendAnalysis.getPrimaryTrend(), momentumAnalysis.getRsi(),
-                    riskAnalysis.getRiskRewardRatio(), riskAnalysis.getShortTermVolatility());
-
+                    riskAnalysis.getRiskRewardRatio(),
+                    riskAnalysis.getShortTermVolatility(), trendAnalysis.getRule());
+            if (trendAnalysis.getRule() > 0){
+                String logMessage = String.format("Analysis for %s: LongScore=%s, ShortScore=%s, Signal=%s, " +
+                                "Trend=%s, RSI=%s, RiskReward=%s, Vol15m=%s Rule=%s",
+                        symbol, longScore, shortScore, signal,
+                        trendAnalysis.getPrimaryTrend(), momentumAnalysis.getRsi(),
+                        riskAnalysis.getRiskRewardRatio(),
+                        riskAnalysis.getShortTermVolatility(), trendAnalysis.getRule());
+                tradeWithRule(logMessage);
+            }
             return new CoinAnalysis(symbol, finalScore, signal, lastPrice);
 
         } catch (Exception e) {
             log.error("Failed to analyze swing coin {}", symbol, e);
             return new CoinAnalysis(symbol, 0.0, Signal.NO_TRADE, lastPrice);
         }
+    }
+
+    private void tradeWithRule(String message) {
+        publisher.publishEvent(new TradeClosedUpdateEvent(this, message));
     }
 
     private VolumeAnalysis analyzeVolume(List<Double> volumes4h) {
@@ -400,6 +416,7 @@ public class SwingAlgoService {
                                    TrendAnalysis trend, MomentumAnalysis momentum,
                                    RiskAnalysis risk, VolumeAnalysis volume) {
 
+        trend.setRule(0);
         // OPTIMALIZÁLT: Lazább safety filters
         if (risk.getRiskRewardRatio() < 1.2) { // 1.5 → 1.2
             return Signal.NO_TRADE;
@@ -413,7 +430,8 @@ public class SwingAlgoService {
                 (trend.getPrimaryTrend().equals("BULLISH") ||
                         trend.getShortTermTrend().equals("BULLISH")) && // OR helyett AND
                 momentum.isMacdBullish()) { // resistance check eltávolítva
-            return Signal.LONG;
+            trend.setRule(1);
+            return Signal.SHORT;
         }
 
         // OPTIMALIZÁLT: Enyhébb short feltételek
@@ -421,7 +439,8 @@ public class SwingAlgoService {
                 (trend.getPrimaryTrend().equals("BEARISH") ||
                         trend.getShortTermTrend().equals("BEARISH")) && // OR helyett AND
                 momentum.isMacdBearish()) { // support check eltávolítva
-            return Signal.SHORT;
+            trend.setRule(2);
+            return Signal.LONG;
         }
 
         // ÚJ: Momentum-based belépés (gyorsabb reagálás)
@@ -430,30 +449,36 @@ public class SwingAlgoService {
                 momentum.isMacdBullish() &&
                 momentum.isRsiRising() &&
                 risk.getRiskRewardRatio() >= 1.3) {
-            return Signal.LONG;
+            trend.setRule(3);
+            return Signal.SHORT;
         }
 
+        //ez jó
         if (shortScore <= -3.0 &&
                 momentum.isRsiBearishZone() &&
                 momentum.isMacdBearish() &&
                 !momentum.isRsiRising() &&
                 risk.getRiskRewardRatio() >= 1.3) {
-            return Signal.SHORT;
+            trend.setRule(4);
+            return Signal.LONG;
         }
 
+        //vagy ez
         // ÚJ: Volume breakout alapú belépés
         if (longScore >= 2.5 &&
                 momentum.isRsiBullishZone() &&
                 risk.isGoodShortTermVolatility() &&
                 volume.isVolumeBreakout()) {
-            return Signal.LONG;
+            trend.setRule(5);
+            return Signal.SHORT;
         }
 
         if (shortScore <= -2.5 &&
                 momentum.isRsiBearishZone() &&
                 risk.isGoodShortTermVolatility() &&
                 volume.isVolumeBreakout()) {
-            return Signal.SHORT;
+            trend.setRule(6);
+            return Signal.LONG;
         }
 
         // Counter-trend opportunities (recovery trades) - MEGTARTVA
@@ -461,14 +486,16 @@ public class SwingAlgoService {
                 trend.getPrimaryTrend().equals("BULLISH") &&
                 momentum.isRsiOversold() &&
                 risk.getRiskRewardRatio() >= 2.0) { // 2.5 → 2.0
-            return Signal.LONG;
+            trend.setRule(7);
+            return Signal.SHORT;
         }
 
         if (shortScore <= -4.0 &&
                 trend.getPrimaryTrend().equals("BEARISH") &&
                 momentum.isRsiOverbought() &&
                 risk.getRiskRewardRatio() >= 2.0) { // 2.5 → 2.0
-            return Signal.SHORT;
+            trend.setRule(8);
+            return Signal.LONG;
         }
 
         return Signal.NO_TRADE;
