@@ -50,7 +50,12 @@ public class TickerPrefilterService {
 
                 // bad list kizárása
                 .filter(ticker -> !TradeService.BAD_SYMBOL_LIST.contains(new BadSymbolsDto(ticker.getSymbol())))
-
+                // aktív orderek kizárása - symbol alapján ellenőrzés
+                .filter(ticker -> TradeService.activeOrderList.stream()
+                        .noneMatch(order -> order.getSymbol().equals(ticker.getSymbol())))
+                // pending orderek kizárása - symbol alapján ellenőrzés
+                .filter(ticker -> TradeService.orderDtoList.stream()
+                        .noneMatch(order -> order.getSymbol().equals(ticker.getSymbol())))
                 // futures trading specifikus szűrők
                 .filter(this::hasSufficientLiquidity)
                 .filter(this::hasOptimalVolatility)
