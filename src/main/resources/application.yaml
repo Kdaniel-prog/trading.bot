@@ -5,8 +5,8 @@ spring:
 binance:
   restBaseUrl: https://testnet.binancefuture.com
   wsBaseUrl: wss://stream.binancefuture.com/ws/
-  apiKey: 2c8b1824f71f95dc77259ae2d81de508f8e133976a6948c89ea81bff665f589d
-  secretKey: aa5dc12959b2c0205a07f50618fdbe56b7021a68ffe958623338290851138128
+  apiKey: db3ca1b0d31845f71d5d7b15230df67e06685186b5de804117783581708d7257
+  secretKey: cd6660d0bdbf6916acfdddb85ae7ae47a2bd41f859d011cee26fd4460f763811
 
 trading:
   stopLimit: -3.0
