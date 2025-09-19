@@ -427,7 +427,7 @@ public class SwingAlgoService {
 
         // OPTIMALIZÁLT: Enyhébb long feltételek
 
-        if (longScore >= 9.0 &&
+        if (longScore >= 8.0 &&
                 (trend.getPrimaryTrend().equals("BULLISH") ||
                         trend.getShortTermTrend().equals("BULLISH")) && // OR helyett AND
                 momentum.isMacdBullish()) { // resistance check eltávolítva
