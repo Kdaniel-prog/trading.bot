@@ -481,7 +481,7 @@ public class SwingAlgoService {
                 risk.isGoodShortTermVolatility() &&
                 volume.isVolumeBreakout()) {
             trend.setRule(6);
-            return Signal.LONG;
+            return Signal.SHORT;
         }
 
         // Counter-trend opportunities (recovery trades) - MEGTARTVA
