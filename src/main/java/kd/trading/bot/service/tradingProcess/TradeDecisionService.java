@@ -39,11 +39,6 @@ public class TradeDecisionService {
     // === SPECIFIC TRADING THRESHOLDS ==
     static final int PROFIT_DECLINE_CHECK_MINUTES = 30;
     static final int SIDEWAYS_CHECK_MINUTES = 90;
-    static final int LOSE_CHECK_MINUTES = 120;
-    static final int TIME_EXIT_1 = 4;
-    static final int TIME_EXIT_2 = 5;
-    static final int TIME_EXIT_3 = 6;
-    static final int FORCE_EXIT_4 = 12;
 
     @PostConstruct
     void init() {
@@ -261,47 +256,70 @@ public class TradeDecisionService {
     }
 
     /**
-     * Time-based exit strategy with config-proportional controls
+     * Time-based exit strategy with progressive hourly thresholds
      */
     private TradeDecision evaluateTimeBasedExit(OrderDto order, BigDecimal currentPnl, Duration openDuration) {
         long hours = openDuration.toHours();
 
         // Calculate proportional thresholds from config using winOneThird as base
         BigDecimal fourHourThreshold = winOneThird.divide(DIVIDE_BY_TWO, 4, RoundingMode.HALF_UP); // winOneThird / 2
-        BigDecimal forceExitThreshold = loseOneThird; // Using loseOneThird for force exit
+        BigDecimal sixHourThreshold = fourHourThreshold.divide(DIVIDE_BY_TWO, 4, RoundingMode.HALF_UP); // winOneThird / 4
+        BigDecimal forceExitThreshold = loseOneThird.negate(); // Using negative loseOneThird for force exit
 
-        /**
-        // After 2 hours: Take profit above proportional threshold
-        if (hours >= TIME_EXIT_1 && currentPnl.compareTo(winOneThird) <= 0) {
+        // After 2 hours: Take profit above winOneThird threshold
+        if (hours >= 2 && currentPnl.compareTo(winOneThird) >= 0) {
             log.info("⏰ TIME EXIT (2h+): Taking {}% profit for {} (threshold: {}%)",
                     currentPnl, order.getSymbol(), winOneThird);
             return createDecision(TradeAction.CLOSE, order,
                     String.format("TIME EXIT (2h): %.2f%% profit", currentPnl));
         }
 
-        // After 3 hours: Take profit above smaller threshold
-        /**
-         if (hours >= TIME_EXIT_2 && currentPnl.compareTo(winOneThird) <= 0) {
-         log.info("⏰ TIME EXIT (3h+): Taking {}% profit for {} (threshold: {}%)",
-         currentPnl, order.getSymbol(), winOneThird);
-         return createDecision(TradeAction.CLOSE, order,
-         String.format("TIME EXIT (3h): %.2f%% profit", currentPnl));
-         }
+        // After 3 hours: Take profit above winOneThird threshold
+        if (hours >= 3 && currentPnl.compareTo(winOneThird) >= 0) {
+            log.info("⏰ TIME EXIT (3h+): Taking {}% profit for {} (threshold: {}%)",
+                    currentPnl, order.getSymbol(), winOneThird);
+            return createDecision(TradeAction.CLOSE, order,
+                    String.format("TIME EXIT (3h): %.2f%% profit", currentPnl));
+        }
 
-        // After 4 hours: Close if above minimal threshold
-        if (hours >= TIME_EXIT_3 && currentPnl.compareTo(fourHourThreshold) <= 0) {
+        // After 4 hours: Close if above half of winOneThird threshold
+        if (hours >= 4 && currentPnl.compareTo(fourHourThreshold) >= 0) {
             log.info("⏰ TIME EXIT (4h+): Taking {}% profit for {} (threshold: {}%)",
                     currentPnl, order.getSymbol(), fourHourThreshold);
             return createDecision(TradeAction.CLOSE, order,
                     String.format("TIME EXIT (4h): %.2f%% profit", currentPnl));
         }
-         */
-        // After 6 hours: Force close if not too negative (using loseOneThird)
-        if (hours >= FORCE_EXIT_4 && currentPnl.compareTo(forceExitThreshold) <= 0) {
-            log.info("⏰ FORCE TIME EXIT (6h+): Closing at {}% for {} (threshold: {}%)",
+
+        // After 5 hours: Close if above quarter of winOneThird threshold
+        if (hours >= 5 && currentPnl.compareTo(sixHourThreshold) >= 0) {
+            log.info("⏰ TIME EXIT (5h+): Taking {}% profit for {} (threshold: {}%)",
+                    currentPnl, order.getSymbol(), sixHourThreshold);
+            return createDecision(TradeAction.CLOSE, order,
+                    String.format("TIME EXIT (5h): %.2f%% profit", currentPnl));
+        }
+
+        // After 6 hours: Close at breakeven or small profit (threshold = 0)
+        if (hours >= 6 && currentPnl.compareTo(BigDecimal.ZERO) >= 0) {
+            log.info("⏰ TIME EXIT (6h+): Taking {}% profit for {} (breakeven or better)",
+                    currentPnl, order.getSymbol());
+            return createDecision(TradeAction.CLOSE, order,
+                    String.format("TIME EXIT (6h): %.2f%% breakeven+", currentPnl));
+        }
+
+        // After 7 hours: Force close if loss is not too severe
+        if (hours >= 7 && currentPnl.compareTo(forceExitThreshold) >= 0) {
+            log.info("⏰ FORCE TIME EXIT (7h+): Closing at {}% for {} (max loss threshold: {}%)",
                     currentPnl, order.getSymbol(), forceExitThreshold);
             return createDecision(TradeAction.CLOSE, order,
-                    String.format("FORCE TIME EXIT (6h): %.2f%%", currentPnl));
+                    String.format("FORCE TIME EXIT (7h): %.2f%%", currentPnl));
+        }
+
+        // After 8+ hours: Absolute force close regardless of loss
+        if (hours >= 8) {
+            log.warn("⏰ ABSOLUTE FORCE EXIT (8h+): Closing at {}% for {} (maximum time exceeded)",
+                    currentPnl, order.getSymbol());
+            return createDecision(TradeAction.CLOSE, order,
+                    String.format("ABSOLUTE FORCE EXIT (8h): %.2f%%", currentPnl));
         }
 
         return createDecision(TradeAction.HOLD, order, "Time criteria not met");
