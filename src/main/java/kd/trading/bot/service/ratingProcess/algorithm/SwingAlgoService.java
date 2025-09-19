@@ -426,6 +426,7 @@ public class SwingAlgoService {
         // if (!risk.isGoodVolatility()) return Signal.NO_TRADE;
 
         // OPTIMALIZÁLT: Enyhébb long feltételek
+        /**
         if (longScore >= 6.0 &&
                 (trend.getPrimaryTrend().equals("BULLISH") ||
                         trend.getShortTermTrend().equals("BULLISH")) && // OR helyett AND
@@ -433,6 +434,7 @@ public class SwingAlgoService {
             trend.setRule(1);
             return Signal.LONG;
         }
+         */
 
         // OPTIMALIZÁLT: Enyhébb short feltételek
         if (shortScore <= -9.0 &&
@@ -454,11 +456,12 @@ public class SwingAlgoService {
         }
 
         //ez jó
-        if (shortScore <= -5.0 &&
+        if (shortScore <= -5.0 && longScore >= 1.5 && longScore < 2.0 &&
+                trend.getPrimaryTrend().equals("NEUTRAL") &&
                 momentum.isRsiBearishZone() &&
                 momentum.isMacdBearish() &&
                 !momentum.isRsiRising() &&
-                risk.getRiskRewardRatio() >= 1.3) {
+                risk.getRiskRewardRatio() >= 4.0) {
             trend.setRule(4);
             return Signal.SHORT;
         }

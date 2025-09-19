@@ -12,7 +12,7 @@ trading:
   stopLimit: -3.0
   winLimit: 6.0 # 0.4 = 3%
 
-  moneyUsdt: 50
+  moneyUsdt: 100
   maxTrade: 5
 
   coinMinMonth: 4
