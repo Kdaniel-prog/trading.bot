@@ -437,7 +437,7 @@ public class SwingAlgoService {
 
 
         // OPTIMALIZÁLT: Enyhébb short feltételek
-        if (shortScore <= -9.0 &&
+        if (shortScore <= -8.0 &&
                 (trend.getPrimaryTrend().equals("BEARISH") ||
                         trend.getShortTermTrend().equals("BEARISH")) && // OR helyett AND
                 momentum.isMacdBearish()) { // support check eltávolítva
