@@ -6,6 +6,7 @@ import java.util.Set;
 
 @ConfigurationProperties(prefix = "trading")
 public record TradingConfig(
+        Boolean enabled,
         Double stopLimit,
         Double winLimit,
         String tradeWithPercent,

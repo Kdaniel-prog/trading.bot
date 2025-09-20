@@ -72,6 +72,7 @@ binance:
   secretKey: cd6660d0bdbf6916acfdddb85ae7ae47a2bd41f859d011cee26fd4460f763811
 
 trading:
+  enabled: false  # MAIN SWITCH - false = development mode, true = live trading
   stopLimit: -3.0
   winLimit: 6.0
   moneyUsdt: 100

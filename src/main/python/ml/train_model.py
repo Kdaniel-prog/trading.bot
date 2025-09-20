@@ -1,509 +1,389 @@
-# train_model.py
+# ml_predictor.py
 import argparse
 import json
-import pandas as pd
 import numpy as np
 import pickle
+import sys
 from pathlib import Path
-from datetime import datetime
 import logging
 import warnings
 warnings.filterwarnings('ignore')
 
 # ML libraries
 import tensorflow as tf
-from tensorflow import keras
-from tensorflow.keras import layers
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.model_selection import train_test_split, StratifiedKFold
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingRegressor
-from sklearn.metrics import classification_report, mean_squared_error, accuracy_score, roc_auc_score
 import xgboost as xgb
 import lightgbm as lgb
+from sklearn.ensemble import RandomForestClassifier
+
+# Suppress TensorFlow warnings
+tf.get_logger().setLevel('ERROR')
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-class TradingMLTrainer:
+class TradingMLPredictor:
     def __init__(self, model_name="swing_trader", model_path="/app/models"):
         self.model_name = model_name
         self.model_path = Path(model_path)
-        self.model_path.mkdir(parents=True, exist_ok=True)
+        self.models = {}
+        self.scaler = None
+        self.feature_columns = []
+        self.signal_mapping = {'LONG': 1, 'SHORT': -1, 'NO_TRADE': 0}
+        self.reverse_signal_mapping = {v: k for k, v in self.signal_mapping.items()}
+        self.model_info = {}
 
-        self.feature_columns = [
-            'tradingRule', 'algoScore', 'rsi', 'macd', 'macd_signal', 'macd_histogram',
-            'bollinger_upper', 'bollinger_lower', 'bollinger_percent',
-            'sma_20', 'sma_50', 'ema_12', 'ema_26', 'ema_50', 'ema_200',
-            'price_change_1h', 'price_change_4h', 'price_change_1d',
-            'volatility_1h', 'volatility_4h', 'volatility_1d',
-            'volume_ratio', 'atr', 'adx', 'market_trend', 'market_volatility',
-            'hour_of_day', 'day_of_week'
-        ]
+        self.load_models()
 
-    def load_training_data(self, data_path):
-        """Load and prepare training data from JSON files"""
-        logger.info(f"Loading training data from {data_path}")
-
-        data_files = list(Path(data_path).glob("training_data_*.json"))
-        all_data = []
-
-        for file in data_files:
-            try:
-                with open(file, 'r') as f:
-                    file_data = json.load(f)
-                    all_data.extend(file_data)
-                logger.info(f"Loaded {len(file_data)} samples from {file.name}")
-            except Exception as e:
-                logger.warning(f"Failed to load {file}: {e}")
-                continue
-
-        if not all_data:
-            raise ValueError("No training data found")
-
-        df = pd.DataFrame(all_data)
-        logger.info(f"Total loaded samples: {len(df)}")
-
-        return self.preprocess_data(df)
-
-    def preprocess_data(self, df):
-        """Preprocess the training data"""
-        logger.info("Preprocessing training data...")
-
-        # Convert timestamps
-        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
-        df['hour_of_day'] = df['timestamp'].dt.hour
-        df['day_of_week'] = df['timestamp'].dt.dayofweek
-
-        # Handle missing values for feature columns
-        for col in self.feature_columns:
-            if col not in df.columns:
-                df[col] = 0.0
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
-
-        # Encode categorical variables if they exist
-        if 'side' in df.columns:
-            le_signal = LabelEncoder()
-            df['side_encoded'] = le_signal.fit_transform(df['side'].astype(str))
-
-        # Create target variables
-        df['pnlPercent'] = pd.to_numeric(df['pnlPercent'], errors='coerce').fillna(0.0)
-        df['is_profitable'] = (df['pnlPercent'] > 0).astype(int)
-
-        # Create profit categories for additional analysis
-        df['profit_category'] = pd.cut(df['pnlPercent'],
-                                       bins=[-100, -5, -2, 2, 5, 100],
-                                       labels=['terrible', 'bad', 'neutral', 'good', 'excellent'])
-
-        # Filter extreme outliers
-        q99 = df['pnlPercent'].quantile(0.99)
-        q01 = df['pnlPercent'].quantile(0.01)
-        df = df[(df['pnlPercent'] >= q01) & (df['pnlPercent'] <= q99)]
-
-        # Remove rows with too many missing features
-        df = df.dropna(subset=['pnlPercent', 'tradingRule', 'algoScore'])
-
-        logger.info(f"Preprocessed data shape: {df.shape}")
-        logger.info(f"Profitable trades: {df['is_profitable'].sum()} ({df['is_profitable'].mean()*100:.1f}%)")
-        logger.info(f"Average PnL: {df['pnlPercent'].mean():.2f}%")
-
-        return df
-
-    def create_neural_network(self, input_dim, task='classification'):
-        """Create a neural network for trading prediction"""
-        model = keras.Sequential([
-            layers.Dense(256, activation='relu', input_shape=(input_dim,)),
-            layers.BatchNormalization(),
-            layers.Dropout(0.3),
-
-            layers.Dense(128, activation='relu'),
-            layers.BatchNormalization(),
-            layers.Dropout(0.3),
-
-            layers.Dense(64, activation='relu'),
-            layers.BatchNormalization(),
-            layers.Dropout(0.2),
-
-            layers.Dense(32, activation='relu'),
-            layers.Dropout(0.2),
-        ])
-
-        if task == 'classification':
-            model.add(layers.Dense(1, activation='sigmoid'))
-            model.compile(
-                optimizer=keras.optimizers.Adam(learning_rate=0.001),
-                loss='binary_crossentropy',
-                metrics=['accuracy', 'precision', 'recall']
-            )
-        else:
-            model.add(layers.Dense(1, activation='linear'))
-            model.compile(
-                optimizer=keras.optimizers.Adam(learning_rate=0.001),
-                loss='mse',
-                metrics=['mae']
-            )
-
-        return model
-
-    def train_ensemble_model(self, X_train, y_train, X_val, y_val):
-        """Train ensemble model combining multiple algorithms"""
-        models = {}
-
-        # 1. XGBoost Classifier for profitability prediction
-        logger.info("Training XGBoost classifier...")
+    def load_models(self):
+        """Load all trained models and preprocessing objects"""
         try:
-            xgb_clf = xgb.XGBClassifier(
-                n_estimators=200,
-                max_depth=6,
-                learning_rate=0.1,
-                subsample=0.8,
-                colsample_bytree=0.8,
-                random_state=42,
-                eval_metric='logloss'
-            )
-            xgb_clf.fit(X_train, (y_train > 0).astype(int))
-            models['xgb_classifier'] = xgb_clf
-            logger.info("XGBoost classifier trained successfully")
-        except Exception as e:
-            logger.error(f"XGBoost classifier training failed: {e}")
+            # Load model info
+            info_file = self.model_path / f"{self.model_name}_info.json"
+            if info_file.exists():
+                with open(info_file, 'r') as f:
+                    self.model_info = json.load(f)
+                    self.feature_columns = self.model_info.get('feature_columns', [])
+                    if 'signal_mapping' in self.model_info:
+                        self.signal_mapping = self.model_info['signal_mapping']
+                        self.reverse_signal_mapping = {v: k for k, v in self.signal_mapping.items()}
+                logger.info(f"Loaded model info with {len(self.feature_columns)} features")
+            else:
+                logger.warning(f"Model info not found: {info_file}")
 
-        # 2. XGBoost Regressor for return prediction
-        logger.info("Training XGBoost regressor...")
-        try:
-            xgb_reg = xgb.XGBRegressor(
-                n_estimators=200,
-                max_depth=6,
-                learning_rate=0.1,
-                subsample=0.8,
-                colsample_bytree=0.8,
-                random_state=42
-            )
-            xgb_reg.fit(X_train, y_train)
-            models['xgb_regressor'] = xgb_reg
-            logger.info("XGBoost regressor trained successfully")
-        except Exception as e:
-            logger.error(f"XGBoost regressor training failed: {e}")
+            # Load scaler
+            scaler_file = self.model_path / f"{self.model_name}_scaler.pkl"
+            if scaler_file.exists():
+                with open(scaler_file, 'rb') as f:
+                    self.scaler = pickle.load(f)
+                logger.info("Loaded feature scaler")
+            else:
+                logger.error(f"Scaler not found: {scaler_file}")
+                return False
 
-        # 3. LightGBM for additional ensemble diversity
-        logger.info("Training LightGBM classifier...")
-        try:
-            lgb_clf = lgb.LGBMClassifier(
-                n_estimators=150,
-                max_depth=6,
-                learning_rate=0.1,
-                subsample=0.8,
-                colsample_bytree=0.8,
-                random_state=42,
-                verbose=-1
-            )
-            lgb_clf.fit(X_train, (y_train > 0).astype(int))
-            models['lgb_classifier'] = lgb_clf
-            logger.info("LightGBM classifier trained successfully")
-        except Exception as e:
-            logger.error(f"LightGBM classifier training failed: {e}")
-
-        # 4. Random Forest for feature importance and robustness
-        logger.info("Training Random Forest...")
-        try:
-            rf = RandomForestClassifier(
-                n_estimators=100,
-                max_depth=10,
-                min_samples_split=5,
-                min_samples_leaf=2,
-                random_state=42,
-                n_jobs=-1
-            )
-            rf.fit(X_train, (y_train > 0).astype(int))
-            models['random_forest'] = rf
-            logger.info("Random Forest trained successfully")
-        except Exception as e:
-            logger.error(f"Random Forest training failed: {e}")
-
-        # 5. Neural Networks
-        logger.info("Training Neural Networks...")
-        try:
-            # Classification network
-            nn_clf = self.create_neural_network(X_train.shape[1], 'classification')
-
-            # Callbacks
-            early_stopping = keras.callbacks.EarlyStopping(
-                monitor='val_loss', patience=15, restore_best_weights=True, verbose=0
-            )
-            reduce_lr = keras.callbacks.ReduceLROnPlateau(
-                monitor='val_loss', factor=0.5, patience=8, min_lr=1e-6, verbose=0
-            )
-
-            # Train classifier
-            nn_clf.fit(X_train, (y_train > 0).astype(int),
-                       validation_data=(X_val, (y_val > 0).astype(int)),
-                       epochs=100, batch_size=64, verbose=0,
-                       callbacks=[early_stopping, reduce_lr])
-            models['neural_net_classifier'] = nn_clf
-
-            # Regression network
-            nn_reg = self.create_neural_network(X_train.shape[1], 'regression')
-            nn_reg.fit(X_train, y_train,
-                       validation_data=(X_val, y_val),
-                       epochs=100, batch_size=64, verbose=0,
-                       callbacks=[early_stopping, reduce_lr])
-            models['neural_net_regressor'] = nn_reg
-
-            logger.info("Neural Networks trained successfully")
-        except Exception as e:
-            logger.error(f"Neural Network training failed: {e}")
-
-        logger.info(f"Successfully trained {len(models)} models")
-        return models
-
-    def evaluate_models(self, models, X_test, y_test):
-        """Evaluate all models and return comprehensive metrics"""
-        results = {}
-        y_binary = (y_test > 0).astype(int)
-
-        for name, model in models.items():
-            logger.info(f"Evaluating {name}...")
-
-            try:
-                if 'classifier' in name:
-                    # Classification metrics
-                    if hasattr(model, 'predict_proba'):
-                        y_pred_proba = model.predict_proba(X_test)
-                        if y_pred_proba.shape[1] > 1:
-                            y_pred_proba = y_pred_proba[:, 1]
-                        else:
-                            y_pred_proba = y_pred_proba.flatten()
-                    else:
-                        y_pred_proba = model.predict(X_test).flatten()
-
-                    y_pred = (y_pred_proba > 0.5).astype(int)
-
-                    accuracy = accuracy_score(y_binary, y_pred)
-                    try:
-                        auc_score = roc_auc_score(y_binary, y_pred_proba)
-                    except:
-                        auc_score = 0.5
-
-                    # Trading metrics
-                    predicted_trades = X_test[y_pred == 1]
-                    actual_profits = y_test[y_pred == 1]
-
-                    if len(actual_profits) > 0:
-                        avg_profit = actual_profits.mean()
-                        win_rate = (actual_profits > 0).mean()
-                        total_profit = actual_profits.sum()
-                    else:
-                        avg_profit = win_rate = total_profit = 0
-
-                    results[name] = {
-                        'accuracy': float(accuracy),
-                        'auc_score': float(auc_score),
-                        'avg_predicted_profit': float(avg_profit),
-                        'predicted_win_rate': float(win_rate),
-                        'total_predicted_profit': float(total_profit),
-                        'total_predictions': int(np.sum(y_pred)),
-                        'type': 'classification'
-                    }
-
-                else:  # Regression models
-                    y_pred = model.predict(X_test)
-                    if hasattr(y_pred, 'flatten'):
-                        y_pred = y_pred.flatten()
-
-                    mse = mean_squared_error(y_test, y_pred)
-                    mae = np.mean(np.abs(y_test - y_pred))
-
-                    # Directional accuracy
-                    direction_accuracy = np.mean((y_test > 0) == (y_pred > 0))
-
-                    # Correlation
-                    correlation = np.corrcoef(y_test, y_pred)[0, 1] if len(y_test) > 1 else 0
-
-                    results[name] = {
-                        'mse': float(mse),
-                        'mae': float(mae),
-                        'rmse': float(np.sqrt(mse)),
-                        'direction_accuracy': float(direction_accuracy),
-                        'correlation': float(correlation),
-                        'type': 'regression'
-                    }
-
-            except Exception as e:
-                logger.error(f"Evaluation failed for {name}: {e}")
-                results[name] = {'error': str(e)}
-
-        return results
-
-    def save_models(self, models, scaler, feature_columns, evaluation_results):
-        """Save all trained models and preprocessing objects"""
-        model_info = {
-            'model_name': self.model_name,
-            'created_at': datetime.now().isoformat(),
-            'feature_columns': feature_columns,
-            'model_types': list(models.keys()),
-            'evaluation_results': evaluation_results,
-            'training_config': {
-                'ensemble_models': len(models),
-                'feature_count': len(feature_columns),
-                'framework': 'sklearn + tensorflow + xgboost + lightgbm'
+            # Load individual models
+            model_files = {
+                'xgb_profitability': f"{self.model_name}_xgb_profitability.pkl",
+                'xgb_signal': f"{self.model_name}_xgb_signal.pkl",
+                'xgb_return': f"{self.model_name}_xgb_return.pkl",
+                'lgb_profitability': f"{self.model_name}_lgb_profitability.pkl",
+                'random_forest': f"{self.model_name}_random_forest.pkl",
+                'neural_profitability': f"{self.model_name}_neural_profitability.h5",
+                'neural_return': f"{self.model_name}_neural_return.h5"
             }
-        }
 
-        # Save individual models
-        for name, model in models.items():
-            model_file = self.model_path / f"{self.model_name}_{name}"
+            for model_name, filename in model_files.items():
+                model_file = self.model_path / filename
 
-            try:
-                if 'neural' in name:
-                    model.save(f"{model_file}.h5")
+                if model_file.exists():
+                    try:
+                        if filename.endswith('.h5'):
+                            # Load TensorFlow model
+                            self.models[model_name] = tf.keras.models.load_model(model_file, compile=False)
+                        else:
+                            # Load pickle model
+                            with open(model_file, 'rb') as f:
+                                self.models[model_name] = pickle.load(f)
+
+                        logger.info(f"Loaded {model_name}")
+                    except Exception as e:
+                        logger.warning(f"Failed to load {model_name}: {e}")
                 else:
-                    with open(f"{model_file}.pkl", 'wb') as f:
-                        pickle.dump(model, f)
+                    logger.warning(f"Model file not found: {model_file}")
 
-                logger.info(f"Saved {name} to {model_file}")
-            except Exception as e:
-                logger.error(f"Failed to save {name}: {e}")
+            if not self.models:
+                logger.error("No models loaded successfully")
+                return False
 
-        # Save scaler
-        scaler_file = self.model_path / f"{self.model_name}_scaler.pkl"
-        try:
-            with open(scaler_file, 'wb') as f:
-                pickle.dump(scaler, f)
-            logger.info(f"Saved scaler to {scaler_file}")
+            logger.info(f"Successfully loaded {len(self.models)} models")
+            return True
+
         except Exception as e:
-            logger.error(f"Failed to save scaler: {e}")
+            logger.error(f"Failed to load models: {e}")
+            return False
 
-        # Save model info
-        info_file = self.model_path / f"{self.model_name}_info.json"
+    def prepare_features(self, data):
+        """Prepare features from input data"""
         try:
-            with open(info_file, 'w') as f:
-                json.dump(model_info, f, indent=2)
-            logger.info(f"Saved model info to {info_file}")
+            # Convert to numpy array format expected by models
+            if isinstance(data, dict):
+                # Extract features in correct order
+                features = []
+                missing_features = []
+
+                for feature in self.feature_columns:
+                    if feature in data:
+                        value = data[feature]
+                        # Handle potential None/null values
+                        if value is None:
+                            value = 0.0
+                        features.append(float(value))
+                    else:
+                        features.append(0.0)  # Default value for missing features
+                        missing_features.append(feature)
+
+                if missing_features:
+                    logger.warning(f"Missing features (using 0.0): {missing_features[:5]}...")
+
+                X = np.array([features])
+
+            else:
+                # Assume it's already a proper array/list
+                X = np.array(data).reshape(1, -1)
+
+            # Validate feature count
+            if X.shape[1] != len(self.feature_columns):
+                logger.warning(f"Feature count mismatch: got {X.shape[1]}, expected {len(self.feature_columns)}")
+
+                # Pad or truncate to match expected features
+                if X.shape[1] < len(self.feature_columns):
+                    padding = np.zeros((X.shape[0], len(self.feature_columns) - X.shape[1]))
+                    X = np.hstack([X, padding])
+                else:
+                    X = X[:, :len(self.feature_columns)]
+
+            # Apply feature scaling
+            if self.scaler is not None:
+                X_scaled = self.scaler.transform(X)
+            else:
+                X_scaled = X
+                logger.warning("No scaler available, using raw features")
+
+            # Handle any remaining NaN/inf values
+            X_scaled = np.nan_to_num(X_scaled, nan=0.0, posinf=1.0, neginf=-1.0)
+
+            return X_scaled
+
         except Exception as e:
-            logger.error(f"Failed to save model info: {e}")
+            logger.error(f"Feature preparation failed: {e}")
+            return None
 
-        logger.info(f"All models saved to {self.model_path}")
-        return model_info
-
-    def train(self, data_path):
-        """Main training pipeline"""
+    def predict(self, data):
+        """Make ensemble prediction from input data"""
         try:
-            start_time = datetime.now()
+            # Prepare features
+            X = self.prepare_features(data)
+            if X is None:
+                return self.create_error_response("Feature preparation failed")
 
-            # Load and preprocess data
-            df = self.load_training_data(data_path)
+            # Collect predictions from all models
+            predictions = {}
+            confidences = {}
 
-            if len(df) < 100:
-                raise ValueError(f"Insufficient training data: {len(df)} samples")
+            # Binary profitability predictions
+            profitability_preds = []
+            profitability_names = ['xgb_profitability', 'lgb_profitability', 'random_forest', 'neural_profitability']
 
-            # Prepare features and targets
-            available_features = [col for col in self.feature_columns if col in df.columns]
-            logger.info(f"Using {len(available_features)} features: {available_features}")
+            for model_name in profitability_names:
+                if model_name in self.models:
+                    try:
+                        model = self.models[model_name]
 
-            X = df[available_features].values
-            y = df['pnlPercent'].values
+                        if 'neural' in model_name:
+                            # Neural network prediction
+                            pred = model.predict(X, verbose=0)[0][0]
+                        elif hasattr(model, 'predict_proba'):
+                            # Classifier with probability
+                            pred = model.predict_proba(X)[0][1]
+                        else:
+                            # Simple prediction
+                            pred = model.predict(X)[0]
 
-            # Check for valid data
-            if np.isnan(X).all() or np.isnan(y).all():
-                raise ValueError("All features or targets are NaN")
+                        profitability_preds.append(float(pred))
+                        predictions[model_name] = float(pred)
 
-            # Scale features
-            scaler = StandardScaler()
-            X_scaled = scaler.fit_transform(X)
+                    except Exception as e:
+                        logger.warning(f"Prediction failed for {model_name}: {e}")
 
-            # Split data strategically
-            X_train, X_temp, y_train, y_temp = train_test_split(
-                X_scaled, y, test_size=0.4, random_state=42,
-                stratify=(y > 0) if len(np.unique(y > 0)) > 1 else None
-            )
-            X_val, X_test, y_val, y_test = train_test_split(
-                X_temp, y_temp, test_size=0.5, random_state=42,
-                stratify=(y_temp > 0) if len(np.unique(y_temp > 0)) > 1 else None
-            )
+            # Return predictions
+            return_preds = []
+            return_names = ['xgb_return', 'neural_return']
 
-            logger.info(f"Data split - Train: {X_train.shape[0]}, Val: {X_val.shape[0]}, Test: {X_test.shape[0]}")
+            for model_name in return_names:
+                if model_name in self.models:
+                    try:
+                        model = self.models[model_name]
 
-            # Train ensemble models
-            models = self.train_ensemble_model(X_train, y_train, X_val, y_val)
+                        if 'neural' in model_name:
+                            pred = model.predict(X, verbose=0)[0][0]
+                        else:
+                            pred = model.predict(X)[0]
 
-            if not models:
-                raise ValueError("No models were successfully trained")
+                        return_preds.append(float(pred))
+                        predictions[model_name] = float(pred)
 
-            # Evaluate models
-            results = self.evaluate_models(models, X_test, y_test)
+                    except Exception as e:
+                        logger.warning(f"Return prediction failed for {model_name}: {e}")
 
-            # Save everything
-            model_info = self.save_models(models, scaler, available_features, results)
+            # Signal classification (if available)
+            signal_pred = None
+            if 'xgb_signal' in self.models:
+                try:
+                    signal_raw = self.models['xgb_signal'].predict(X)[0]
+                    # Convert from 0,1,2 back to LONG,NO_TRADE,SHORT
+                    signal_mapping_inv = {0: 'SHORT', 1: 'NO_TRADE', 2: 'LONG'}
+                    signal_pred = signal_mapping_inv.get(signal_raw, 'NO_TRADE')
+                    predictions['signal_classification'] = signal_pred
+                except Exception as e:
+                    logger.warning(f"Signal prediction failed: {e}")
 
-            training_time = (datetime.now() - start_time).total_seconds()
+            # Ensemble decision making
+            if not profitability_preds and not return_preds:
+                return self.create_error_response("No valid predictions obtained")
 
-            # Final results
-            final_results = {
+            # Calculate ensemble confidence
+            if profitability_preds:
+                avg_profitability = np.mean(profitability_preds)
+                profitability_confidence = avg_profitability
+            else:
+                avg_profitability = 0.5
+                profitability_confidence = 0.5
+
+            if return_preds:
+                avg_return = np.mean(return_preds)
+                return_std = np.std(return_preds) if len(return_preds) > 1 else 0.1
+            else:
+                avg_return = 0.0
+                return_std = 0.1
+
+            # Decision logic for trading signal
+            final_signal = 'NO_TRADE'
+            final_confidence = 0.5
+
+            # High confidence thresholds
+            HIGH_CONFIDENCE_THRESHOLD = 0.7
+            MEDIUM_CONFIDENCE_THRESHOLD = 0.6
+
+            if signal_pred and signal_pred != 'NO_TRADE':
+                # Use signal classifier if available and confident
+                if profitability_confidence > MEDIUM_CONFIDENCE_THRESHOLD:
+                    final_signal = signal_pred
+                    final_confidence = profitability_confidence
+            else:
+                # Use return-based decision
+                if avg_return > 1.0 and profitability_confidence > HIGH_CONFIDENCE_THRESHOLD:
+                    final_signal = 'LONG'
+                    final_confidence = min(profitability_confidence, (avg_return / 5.0))  # Cap at reasonable level
+                elif avg_return < -1.0 and profitability_confidence > HIGH_CONFIDENCE_THRESHOLD:
+                    final_signal = 'SHORT'
+                    final_confidence = min(profitability_confidence, (abs(avg_return) / 5.0))
+                elif profitability_confidence > 0.8 and abs(avg_return) > 0.5:
+                    # Medium confidence trades
+                    final_signal = 'LONG' if avg_return > 0 else 'SHORT'
+                    final_confidence = profitability_confidence * 0.8
+
+            # Apply additional safety filters
+            if final_confidence < 0.55:  # Below reasonable threshold
+                final_signal = 'NO_TRADE'
+                final_confidence = 0.5
+
+            # Cap confidence to reasonable range
+            final_confidence = max(0.5, min(0.95, final_confidence))
+
+            # Create response
+            response = {
                 'success': True,
-                'training_time_seconds': training_time,
-                'models_trained': len(models),
-                'training_samples': len(df),
-                'test_samples': len(y_test),
-                'feature_count': len(available_features),
-                'model_performance': results,
-                'data_summary': {
-                    'total_trades': len(df),
-                    'profitable_trades': int((df['pnlPercent'] > 0).sum()),
-                    'win_rate': float((df['pnlPercent'] > 0).mean()),
-                    'avg_return': float(df['pnlPercent'].mean()),
-                    'std_return': float(df['pnlPercent'].std())
+                'predicted_signal': final_signal,
+                'confidence': float(final_confidence),
+                'expected_return': float(avg_return),
+                'profitability_score': float(avg_profitability),
+                'model_predictions': predictions,
+                'ensemble_info': {
+                    'profitability_models': len(profitability_preds),
+                    'return_models': len(return_preds),
+                    'total_models': len(predictions)
+                },
+                'metadata': {
+                    'model_name': self.model_name,
+                    'feature_count': len(self.feature_columns),
+                    'timestamp': str(np.datetime64('now'))
                 }
             }
 
-            logger.info("="*50)
-            logger.info("TRAINING COMPLETED SUCCESSFULLY!")
-            logger.info(f"Training time: {training_time:.1f}s")
-            logger.info(f"Models trained: {len(models)}")
-            logger.info(f"Training samples: {len(df)}")
-
-            # Print model performance summary
-            for name, metrics in results.items():
-                if 'error' not in metrics:
-                    if metrics['type'] == 'classification':
-                        logger.info(f"{name}: Accuracy={metrics.get('accuracy', 0):.3f}, AUC={metrics.get('auc_score', 0):.3f}")
-                    else:
-                        logger.info(f"{name}: RMSE={metrics.get('rmse', 0):.3f}, Direction Acc={metrics.get('direction_accuracy', 0):.3f}")
-
-            logger.info("="*50)
-
-            return final_results
+            logger.info(f"Prediction: {final_signal} (confidence: {final_confidence:.3f}, return: {avg_return:.2f})")
+            return response
 
         except Exception as e:
-            logger.error(f"Training failed: {e}")
-            return {
-                'success': False,
-                'error': str(e),
-                'training_time_seconds': 0,
-                'models_trained': 0
+            logger.error(f"Prediction failed: {e}")
+            return self.create_error_response(f"Prediction error: {str(e)}")
+
+    def create_error_response(self, error_msg):
+        """Create standardized error response"""
+        return {
+            'success': False,
+            'predicted_signal': 'NO_TRADE',
+            'confidence': 0.0,
+            'expected_return': 0.0,
+            'error': error_msg,
+            'metadata': {
+                'model_name': self.model_name,
+                'timestamp': str(np.datetime64('now'))
             }
+        }
+
+    def get_model_info(self):
+        """Return information about loaded models"""
+        return {
+            'model_name': self.model_name,
+            'loaded_models': list(self.models.keys()),
+            'feature_count': len(self.feature_columns),
+            'features': self.feature_columns,
+            'has_scaler': self.scaler is not None,
+            'model_info': self.model_info
+        }
 
 def main():
-    parser = argparse.ArgumentParser(description='Train trading ML model')
-    parser.add_argument('--model-name', default='swing_trader', help='Model name')
-    parser.add_argument('--data-path', required=True, help='Path to training data')
-    parser.add_argument('--model-path', default='/app/models', help='Path to save models')
+    parser = argparse.ArgumentParser(description='ML Trading Signal Predictor')
+    parser.add_argument('--model-name', default='swing_trader', help='Model name prefix')
+    parser.add_argument('--model-path', default='/app/models', help='Path to model files')
+    parser.add_argument('--input-data', help='JSON string with input data')
+    parser.add_argument('--input-file', help='Path to JSON file with input data')
+    parser.add_argument('--info', action='store_true', help='Show model info only')
 
     args = parser.parse_args()
 
-    try:
-        trainer = TradingMLTrainer(args.model_name, args.model_path)
-        results = trainer.train(args.data_path)
+    # Initialize predictor
+    predictor = TradingMLPredictor(args.model_name, args.model_path)
 
-        print(json.dumps(results, indent=2))
+    if args.info:
+        # Return model information
+        info = predictor.get_model_info()
+        print(json.dumps(info, indent=2))
+        return
 
-        if results.get('success', False):
-            exit(0)
-        else:
-            exit(1)
+    # Get input data
+    input_data = None
 
-    except Exception as e:
-        logger.error(f"Training script failed: {e}")
-        print(json.dumps({"success": False, "error": str(e)}, indent=2))
-        exit(1)
+    if args.input_data:
+        try:
+            input_data = json.loads(args.input_data)
+        except json.JSONDecodeError as e:
+            print(json.dumps({'success': False, 'error': f'Invalid JSON: {e}'}))
+            sys.exit(1)
+    elif args.input_file:
+        try:
+            with open(args.input_file, 'r') as f:
+                input_data = json.load(f)
+        except Exception as e:
+            print(json.dumps({'success': False, 'error': f'File error: {e}'}))
+            sys.exit(1)
+    else:
+        # Read from stdin
+        try:
+            input_data = json.loads(sys.stdin.read())
+        except json.JSONDecodeError as e:
+            print(json.dumps({'success': False, 'error': f'Invalid JSON from stdin: {e}'}))
+            sys.exit(1)
+
+    if not input_data:
+        print(json.dumps({'success': False, 'error': 'No input data provided'}))
+        sys.exit(1)
+
+    # Make prediction
+    result = predictor.predict(input_data)
+    print(json.dumps(result, indent=2))
+
+    sys.exit(0 if result.get('success', False) else 1)
 
 if __name__ == "__main__":
     main()

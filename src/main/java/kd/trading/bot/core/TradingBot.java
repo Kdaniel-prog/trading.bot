@@ -14,6 +14,7 @@ import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
@@ -22,59 +23,168 @@ import java.net.URISyntaxException;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-@FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
+@FieldDefaults(level = AccessLevel.PRIVATE)
+@ConditionalOnProperty(name = "trading.enabled", havingValue = "true", matchIfMissing = false)
 public class TradingBot implements MarketDataListener, AccountDataListener {
-     TradableSymbolService tradableSymbolService;
-     BinanceSessionManager sessionManager;
-     MarketDataPipelineService pipelineService;
-     BinanceEventConverter converter;
-     HandleOrderUpdateService handleOrderUpdateService;
-     TradeCheckingService checkingService;
-     BinanceConfig binanceConfig;
-     TradeService tradeService;
-     TradingConfig tradingConfig;
+
+    final TradableSymbolService tradableSymbolService;
+    final BinanceSessionManager sessionManager;
+    final MarketDataPipelineService pipelineService;
+    final BinanceEventConverter converter;
+    final HandleOrderUpdateService handleOrderUpdateService;
+    final TradeCheckingService checkingService;
+    final BinanceConfig binanceConfig;
+    final TradeService tradeService;
+    final TradingConfig tradingConfig;
+
+    boolean isRunning = false;
+    BinanceMarketWebSocketClient marketClient;
+    AccountWebSocketService accountClient;
 
     @PostConstruct
     private void init() throws URISyntaxException {
-        // 0. get active trades (if app restart we will load the trades)
+        if (!tradingConfig.enabled()) {
+            log.warn("🚫 Trading is DISABLED in configuration (trading.enabled=false)");
+            return;
+        }
+
+        try {
+            startTradingBot();
+        } catch (Exception e) {
+            log.error("❌ Failed to start TradingBot: {}", e.getMessage(), e);
+            throw e;
+        }
+    }
+
+    private void startTradingBot() throws URISyntaxException {
+        log.info("🤖 Starting TradingBot with config: {}", tradingConfig.getRiskSummary());
+
+        // 0. Load active trades (if app restart we will load the trades)
         tradeService.loadActiveOrdersOnStartup();
         TradeService.BANNED_SYMBOL.addAll(tradingConfig.banSymbol());
 
-        //1. start Binance market ws
+        // 1. Start Binance market WebSocket
         String wsUrlMain = "wss://fstream.binance.com/stream?streams=!ticker@arr";
-        BinanceMarketWebSocketClient client = new BinanceMarketWebSocketClient(new URI(wsUrlMain), this);
-        client.connect();
+        marketClient = new BinanceMarketWebSocketClient(new URI(wsUrlMain), this);
+        marketClient.connect();
 
-        //2. Start Account Update ws
-        String wsUrl =  binanceConfig.wsBaseUrl() + sessionManager.getListenKey();
-        AccountWebSocketService tradeClient = new AccountWebSocketService(wsUrl,this);
-        tradeClient.connect();
-    }
+        log.info("📡 Market data WebSocket connected: {}", wsUrlMain);
 
-    @Override
-    public void onTradeData(String message) {
-        Object dto = converter.convert(message);
-        log.debug("dto :{}", dto);
-        handleOrderUpdateService.controlOrderListsAndProfit(dto);
+        // 2. Start Account Update WebSocket
+        String wsUrl = binanceConfig.wsBaseUrl() + sessionManager.getListenKey();
+        accountClient = new AccountWebSocketService(wsUrl, this);
+        accountClient.connect();
+
+        log.info("👤 Account data WebSocket connected: {}", wsUrl);
+
+        isRunning = true;
+        log.info("✅ TradingBot started successfully - Live trading ENABLED");
     }
 
     /**
-     * Itt 5 percenként tradelünk
-     * @param message
+     * Gracefully stop the trading bot
+     */
+    public void stopTradingBot() {
+        if (!isRunning) {
+            log.info("🔄 TradingBot is already stopped");
+            return;
+        }
+
+        log.info("🛑 Stopping TradingBot...");
+
+        try {
+            if (marketClient != null) {
+                marketClient.close();
+                log.info("📡 Market WebSocket disconnected");
+            }
+
+            if (accountClient != null) {
+                accountClient.close();
+                log.info("👤 Account WebSocket disconnected");
+            }
+
+            log.info("✅ TradingBot stopped successfully");
+
+        } catch (Exception e) {
+            log.error("❌ Error stopping TradingBot: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Check if trading bot is currently running
+     */
+    public boolean isRunning() {
+        return !isRunning || !tradingConfig.enabled();
+    }
+
+    /**
+     * Handle account/trade updates (order fills, balance changes, etc.)
+     */
+    @Override
+    public void onTradeData(String message) {
+        if (isRunning()) {
+            return;
+        }
+
+        try {
+            Object dto = converter.convert(message);
+            log.debug("📊 Trade data: {}", dto);
+            handleOrderUpdateService.controlOrderListsAndProfit(dto);
+        } catch (Exception e) {
+            log.error("❌ Error processing trade data: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Market data processing - triggers trading algorithm every 15 minutes
      */
     @Override
     public void onMarketData(String message) {
-        pipelineService.processMessage(message, tradableSymbolService.getTradableSymbols());
+        if (isRunning()) {
+            return;
+        }
+
+        try {
+            log.debug("📈 Processing market data for algorithm analysis");
+            pipelineService.processMessage(message, tradableSymbolService.getTradableSymbols());
+        } catch (Exception e) {
+            log.error("❌ Error processing market data: {}", e.getMessage());
+        }
     }
 
     /**
-     * Itt x másodpercenként jön marketről adat és itt nézük mennyi a profit és loss a coinon.
-     * @param message
+     * Real-time price updates - monitors active trades for P&L
      */
     @Override
     public void onChangeData(String message) {
-        if(!TradeService.getActiveOrderList().isEmpty()){
-            checkingService.calculateTradeInfos(message);
+        if (isRunning()) {
+            return;
         }
+
+        try {
+            // Only process if we have active trades
+            if (!TradeService.getActiveOrderList().isEmpty()) {
+                checkingService.calculateTradeInfos(message);
+            }
+        } catch (Exception e) {
+            log.error("❌ Error processing price change data: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Get trading status summary
+     */
+    public String getStatus() {
+        if (!tradingConfig.isLiveTradingEnabled()) {
+            return "DISABLED (trading.enabled=false)";
+        }
+
+        if (isRunning) {
+            return String.format("RUNNING - Active trades: %d, Risk: %s",
+                    TradeService.getActiveOrderList().size(),
+                    tradingConfig.getRiskSummary());
+        }
+
+        return "STOPPED";
     }
 }

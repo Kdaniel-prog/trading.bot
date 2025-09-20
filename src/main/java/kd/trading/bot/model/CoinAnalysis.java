@@ -9,14 +9,17 @@ import lombok.NoArgsConstructor;
 import java.util.HashMap;
 import java.util.Map;
 
-// Enhanced CoinAnalysis with ML integration
+/**
+ * Enhanced CoinAnalysis with pure technical analysis + ML integration
+ * Separates technical calculations from trading decisions
+ */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 public class CoinAnalysis {
     private String symbol;
-    private double score;
-    private Signal signal;
+    private double score;              // Final combined score (0-10)
+    private Signal signal;             // Final trading decision (from ML)
     private double lastPrice;
 
     // Original constructor for backward compatibility
@@ -27,114 +30,179 @@ public class CoinAnalysis {
         this.lastPrice = lastPrice;
     }
 
+    // === ML INTEGRATION ===
     private MLPredictionResponse mlPrediction;
     private double mlConfidence;
-    private double traditionalScore;
-    private String combinationMethod;
+    private String analysisReason;     // Why NO_TRADE or reason for analysis
 
-    // NEW: Detailed scoring for backtesting
+    // === TECHNICAL ANALYSIS DATA ===
+    private TechnicalIndicators technicalIndicators;
+
+    // === LEGACY SUPPORT (for backtesting) ===
     private Double longScore;
     private Double shortScore;
     private Integer tradingRule;
 
-    // NEW: Analysis components for ML feature extraction
+    // === DEPRECATED - for backward compatibility ===
+    @Deprecated
     private TrendAnalysis trendAnalysis;
+    @Deprecated
     private MomentumAnalysis momentumAnalysis;
+    @Deprecated
     private VolumeAnalysis volumeAnalysis;
+    @Deprecated
     private RiskAnalysis riskAnalysis;
+    @Deprecated
     private StructureAnalysis structureAnalysis;
 
     /**
-     * Extract features for ML training (same format as prepareMlData)
+     * Extract ML features from technical indicators
      */
     public Map<String, Object> extractMlFeatures() {
         Map<String, Object> features = new HashMap<>();
 
         features.put("symbol", symbol);
         features.put("currentPrice", lastPrice);
+        features.put("timestamp", System.currentTimeMillis());
 
-        if (trendAnalysis != null) {
-            features.put("trendAnalysis", Map.of(
-                    "primaryTrend", trendAnalysis.getPrimaryTrend(),
-                    "shortTermTrend", trendAnalysis.getShortTermTrend(),
-                    "trendAlignment", trendAnalysis.isTrendAlignment(),
-                    "trendStrength", trendAnalysis.getTrendStrength(),
-                    "ema20_4h", trendAnalysis.getEma20_4h(),
-                    "ema50_4h", trendAnalysis.getEma50_4h()
-            ));
-        }
+        if (technicalIndicators != null) {
+            // Trend features
+            features.put("ema20_4h", technicalIndicators.getEma20_4h());
+            features.put("ema50_4h", technicalIndicators.getEma50_4h());
+            features.put("ema200_daily", technicalIndicators.getEma200_daily());
+            features.put("primaryTrend", technicalIndicators.getPrimaryTrend());
+            features.put("shortTermTrend", technicalIndicators.getShortTermTrend());
+            features.put("trendAlignment", technicalIndicators.isTrendAlignment());
+            features.put("trendStrength", technicalIndicators.getTrendStrength());
 
-        if (momentumAnalysis != null) {
-            features.put("momentumAnalysis", Map.of(
-                    "rsi", momentumAnalysis.getRsi(),
-                    "macdBullish", momentumAnalysis.isMacdBullish(),
-                    "macdBearish", momentumAnalysis.isMacdBearish(),
-                    "rsiBullishZone", momentumAnalysis.isRsiBullishZone(),
-                    "rsiBearishZone", momentumAnalysis.isRsiBearishZone(),
-                    "rsiRising", momentumAnalysis.isRsiRising()
-            ));
-        }
+            // Momentum features
+            features.put("rsi", technicalIndicators.getRsi());
+            features.put("macdLine", technicalIndicators.getMacdLine());
+            features.put("macdSignal", technicalIndicators.getMacdSignal());
+            features.put("macdBullish", technicalIndicators.isMacdBullish());
+            features.put("macdBearish", technicalIndicators.isMacdBearish());
+            features.put("rsiBullishZone", technicalIndicators.isRsiBullishZone());
+            features.put("rsiBearishZone", technicalIndicators.isRsiBearishZone());
+            features.put("rsiOversold", technicalIndicators.isRsiOversold());
+            features.put("rsiOverbought", technicalIndicators.isRsiOverbought());
+            features.put("rsiRising", technicalIndicators.isRsiRising());
 
-        if (volumeAnalysis != null) {
-            features.put("volumeAnalysis", Map.of(
-                    "volumeRatio", volumeAnalysis.getVolumeRatio(),
-                    "strongVolume", volumeAnalysis.isStrongVolume(),
-                    "volumePercentile", volumeAnalysis.getVolumePercentile(),
-                    "volumeBreakout", volumeAnalysis.isVolumeBreakout(),
-                    "volumeTrendUp", volumeAnalysis.isVolumeTrendUp()
-            ));
-        }
+            // Volume features
+            features.put("volumeRatio", technicalIndicators.getVolumeRatio());
+            features.put("strongVolume", technicalIndicators.isStrongVolume());
+            features.put("volumeBreakout", technicalIndicators.isVolumeBreakout());
+            features.put("volumeTrendUp", technicalIndicators.isVolumeTrendUp());
 
-        if (riskAnalysis != null) {
-            features.put("riskAnalysis", Map.of(
-                    "riskRewardRatio", riskAnalysis.getRiskRewardRatio(),
-                    "volatilityPercent", riskAnalysis.getVolatilityPercent(),
-                    "distanceFromSupport", riskAnalysis.getDistanceFromSupport(),
-                    "distanceFromResistance", riskAnalysis.getDistanceFromResistance(),
-                    "goodVolatility", riskAnalysis.isGoodVolatility(),
-                    "nearSupport", riskAnalysis.isNearSupport()
-            ));
-        }
+            // Risk features
+            features.put("volatilityPercent", technicalIndicators.getVolatilityPercent());
+            features.put("riskRewardRatio", technicalIndicators.getRiskRewardRatio());
+            features.put("distanceFromSupport", technicalIndicators.getDistanceFromSupport());
+            features.put("distanceFromResistance", technicalIndicators.getDistanceFromResistance());
 
-        if (structureAnalysis != null) {
-            features.put("structureAnalysis", Map.of(
-                    "higherHighs", structureAnalysis.isHigherHighs(),
-                    "lowerLows", structureAnalysis.isLowerLows(),
-                    "bullishPattern", structureAnalysis.isBullishPattern(),
-                    "bearishPattern", structureAnalysis.isBearishPattern(),
-                    "structureStrength", structureAnalysis.getStructureStrength()
-            ));
+            // Structure features
+            features.put("bullishStructure", technicalIndicators.isBullishMarketStructure());
+            features.put("bearishStructure", technicalIndicators.isBearishMarketStructure());
+            features.put("consolidation", technicalIndicators.isConsolidation());
         }
 
         return features;
     }
 
     /**
-     * Get traditional signal confidence (0-1 scale)
+     * Get technical confidence (0-1 scale) from technical indicators
      */
-    public double getTraditionalConfidence() {
-        double maxScore = Math.max(Math.abs(longScore != null ? longScore : 0.0),
-                Math.abs(shortScore != null ? shortScore : 0.0));
-        return Math.min(1.0, maxScore / 15.0); // Normalize to 0-1
+    public double getTechnicalConfidence() {
+        if (technicalIndicators == null) return 0.0;
+        return technicalIndicators.getTechnicalScore() / 100.0;
     }
 
     /**
-     * Check if this is a strong traditional signal
+     * Check if ML made the final decision
      */
+    public boolean isMlDecision() {
+        return mlPrediction != null && signal == mlPrediction.getPredictedSignal();
+    }
+
+    /**
+     * Get decision source description
+     */
+    public String getDecisionSource() {
+        if (signal == Signal.NO_TRADE) {
+            return analysisReason != null ? analysisReason : "NO_TRADE";
+        }
+
+        if (isMlDecision()) {
+            return String.format("ML (%.1f%% confidence)", mlConfidence * 100);
+        }
+
+        return "TECHNICAL_FALLBACK";
+    }
+
+    /**
+     * Get comprehensive analysis summary
+     */
+    public String getAnalysisSummary() {
+        if (technicalIndicators == null) {
+            return String.format("%s: %s (%.2f) - %s", symbol, signal, score, getDecisionSource());
+        }
+
+        return String.format("%s: %s (%.2f) | %s | Decision: %s",
+                symbol, signal, score,
+                technicalIndicators.getSummary(),
+                getDecisionSource());
+    }
+
+    /**
+     * Check if this is a high-confidence signal
+     */
+    public boolean isHighConfidenceSignal() {
+        if (signal == Signal.NO_TRADE) return false;
+
+        if (isMlDecision()) {
+            return mlConfidence > 0.75;
+        }
+
+        return getTechnicalConfidence() > 0.7;
+    }
+
+    /**
+     * Get risk level assessment
+     */
+    public String getRiskLevel() {
+        if (technicalIndicators == null) return "UNKNOWN";
+
+        double volatility = technicalIndicators.getVolatilityPercent();
+        double riskReward = technicalIndicators.getRiskRewardRatio();
+
+        if (volatility > 10.0 || riskReward < 1.2) return "HIGH";
+        if (volatility > 6.0 || riskReward < 1.5) return "MEDIUM";
+        return "LOW";
+    }
+
+    /**
+     * Legacy method for backward compatibility
+     */
+    @Deprecated
     public boolean isStrongTraditionalSignal() {
-        return getTraditionalConfidence() > 0.6 && signal != Signal.NO_TRADE;
+        return isHighConfidenceSignal();
     }
 
     /**
-     * Get signal strength description
+     * Legacy method for backward compatibility
      */
+    @Deprecated
+    public double getTraditionalConfidence() {
+        return getTechnicalConfidence();
+    }
+
+    /**
+     * Legacy method for backward compatibility
+     */
+    @Deprecated
     public String getSignalStrengthDescription() {
-        double confidence = getTraditionalConfidence();
-        if (confidence > 0.8) return "STRONG";
-        if (confidence > 0.6) return "MODERATE";
-        if (confidence > 0.4) return "WEAK";
+        if (isHighConfidenceSignal()) return "STRONG";
+        if (score > 5.0) return "MODERATE";
+        if (score > 2.0) return "WEAK";
         return "NO_SIGNAL";
     }
-
-
 }
