@@ -41,6 +41,13 @@
 			<scope>test</scope>
 		</dependency>
 
+		<!-- https://mvnrepository.com/artifact/org.springframework/spring-web -->
+		<dependency>
+			<groupId>org.springframework</groupId>
+			<artifactId>spring-web</artifactId>
+			<version>7.0.0-M9</version>
+		</dependency>
+
 		<!--WebSocket-->
 		<dependency>
 			<groupId>org.glassfish.tyrus.bundles</groupId>

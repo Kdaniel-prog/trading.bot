@@ -2,6 +2,69 @@ spring:
   application:
     name: bot
 
+
+# Python Configuration
+python:
+  executable: python3
+  ml:
+    script:
+      path: src/main/python/ml_predictor.py
+    timeout: 10
+
+# BACKTEST Configuration - NEW
+backtest:
+  # Data Configuration
+  data:
+    feather:
+      directory: src/main/python/data
+
+  # Startup Configuration
+  run:
+    on:
+      startup: false  # Set to true for testing
+
+  # Trading Parameters
+  initial:
+    balance: 10000.0
+
+  fee:
+    rate: 0.0004
+
+  position:
+    size:
+      percent: 0.1  # 10% of balance per trade
+
+  # Risk Management
+  risk:
+    stop:
+      loss:
+        percent: 3.0  # Same as trading.stopLimit but positive
+    take:
+      profit:
+        percent: 6.0  # Same as trading.winLimit
+    max:
+      holding:
+        hours: 168  # 7 days max hold
+
+  # Analysis Configuration
+  analysis:
+    enable:
+      rule:
+        analysis: true
+      multi:
+        symbol:
+          analysis: true
+      optimization: false
+
+  # Performance Configuration
+  performance:
+    benchmark:
+      symbol: BTC_USDT  # For comparison
+    parallel:
+      processing: true
+    cache:
+      results: true
+
 binance:
   restBaseUrl: https://testnet.binancefuture.com
   wsBaseUrl: wss://stream.binancefuture.com/ws/
@@ -10,19 +73,17 @@ binance:
 
 trading:
   stopLimit: -3.0
-  winLimit: 6.0 # 0.4 = 3%
-
+  winLimit: 6.0
   moneyUsdt: 100
   maxTrade: 5
-
   coinMinMonth: 4
   coinType: USDT
-  leverage: 3 #ez binancen x20 van nekem alapből.
-  swipeValue: 3.49 #0.19 a profit usdt
+  leverage: 3
+  swipeValue: 3.49
+  # 15 perces értékelési ciklus
+  evaluationInterval: "0 */15 * * * *"
   banSymbol:
-    - 1000SATSUSDT # -0.25
-    - 1000CATUSDT # -0.44
-    - ACHUSDT # -0.27
+    - ASD
 
 telegram:
   username: zzpastabot
@@ -42,3 +103,15 @@ testBinance:
   apiKey: 2c8b1824f71f95dc77259ae2d81de508f8e133976a6948c89ea81bff665f589d
   secretKey: aa5dc12959b2c0205a07f50618fdbe56b7021a68ffe958623338290851138128
 
+# Logging Configuration
+logging:
+  level:
+    kd.trading.bot.service.backtest: INFO
+    kd.trading.bot.runner: INFO
+    root: INFO
+  pattern:
+    console: "%d{HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+# Server Configuration
+server:
+  port: 8080

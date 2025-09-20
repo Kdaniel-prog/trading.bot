@@ -15,6 +15,7 @@ public record TradingConfig(
         Integer coinMinMonth,
         Integer leverage,
         Double swipeValue,
-        Set<String> banSymbol
+        Set<String> banSymbol,
+        String evaluationInterval
 ) {
 }
