@@ -293,7 +293,7 @@ public class HandleOrderUpdateService {
             pythonMLService.submitTradeResult(tradeResult)
                     .thenAccept(success -> {
                         if (success) {
-                            log.info("🤖 ML feedback sent successfully for {} trade: {:.2f}% return",
+                            log.info("🤖 ML feedback sent successfully for {} trade: {}% return",
                                     symbol, percentReturn);
                         } else {
                             log.warn("🤖 ML feedback failed for {} trade", symbol);
@@ -316,18 +316,14 @@ public class HandleOrderUpdateService {
      */
     private Optional<OrderDto> findOriginalTradeForSymbol(String symbol) {
         // First check active trades
-        Optional<OrderDto> activeTrade = TradeService.activeOrderList.stream()
+
+        return TradeService.activeOrderList.stream()
                 .filter(o -> symbol.equals(o.getSymbol()))
                 .findFirst();
-
-        if (activeTrade.isPresent()) {
-            return activeTrade;
-        }
 
         // Fallback: check recent historical trades (if you keep a history)
         // This could be implemented based on your trade history storage
 
-        return Optional.empty();
     }
 
     /**
@@ -382,7 +378,8 @@ public class HandleOrderUpdateService {
 
     public String getTrades() {
         // összefoglaló riport
-        String sb = "*Active trades: " +
+
+        return "*Active trades: " +
                 TradeService.getActiveOrderList().stream()
                         .map(OrderDto::getSymbol)
                         .filter(Objects::nonNull)
@@ -394,22 +391,19 @@ public class HandleOrderUpdateService {
                         .filter(Objects::nonNull)
                         .toList() +
                 "\n";
-
-        return sb;
     }
 
     public String getProfitStatsReport() {
         int totalTrades = winTrades + loseTrades;
 
         double winRate = totalTrades > 0 ? (winTrades * 100.0 / totalTrades) : 0.0;
-        String stats = "====== Profit Statistics ======\n" +
+
+        return "====== Profit Statistics ======\n" +
                 String.format("Total trades: %d\n", totalTrades) +
                 String.format("Winning trades: %d\n", winTrades) +
                 String.format("Losing trades: %d\n", loseTrades) +
                 String.format("Win rate: %.2f%%\n", winRate) +
                 String.format("Accumulated profit: %.4f USDC\n", profit);
-
-        return stats;
     }
 
     public void tradeClosedUpdated(String message) {
