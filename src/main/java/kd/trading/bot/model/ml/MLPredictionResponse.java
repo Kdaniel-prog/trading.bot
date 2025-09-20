@@ -11,6 +11,7 @@ public class MLPredictionResponse {
     // Model metadata
     private String modelVersion;
     private String modelName;
+    private Double modelConfidence;
 
     // Input features used for prediction
     private MLFeatures features;

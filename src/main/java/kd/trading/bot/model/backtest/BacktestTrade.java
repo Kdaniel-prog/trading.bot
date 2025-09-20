@@ -1,6 +1,7 @@
 package kd.trading.bot.model.backtest;
 
 import kd.trading.bot.enums.Signal;
+import kd.trading.bot.model.CoinAnalysis;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -28,6 +29,7 @@ public class BacktestTrade {
 
     // Position details
     private double positionSize;
+    private double quantity; // Add this field
 
     // P&L calculations
     private double pnl; // Absolute profit/loss
@@ -39,6 +41,10 @@ public class BacktestTrade {
 
     // Trade metadata
     private String exitReason; // "SIGNAL", "STOP_LOSS", "TAKE_PROFIT", "TIME_EXIT"
+
+    // Fixed methods that were returning void
+    // Technical analysis context
+    private CoinAnalysis technicalIndicators; // Add this field
 
     // Calculated fields
     public long getHoldingTimeHours() {

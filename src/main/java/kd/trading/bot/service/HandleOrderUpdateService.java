@@ -4,6 +4,8 @@ import kd.trading.bot.mapper.OrderMapper;
 import kd.trading.bot.model.BadSymbolsDto;
 import kd.trading.bot.model.OrderDto;
 import kd.trading.bot.model.OrderTradeUpdateDto;
+import kd.trading.bot.model.ml.MLTradeResult;
+import kd.trading.bot.service.ml.PythonMLService;
 import kd.trading.bot.telegram.eventType.TradeClosedUpdateEvent;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
@@ -13,34 +15,13 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Objects;
+import java.util.Optional;
 
 import static kd.trading.bot.service.TradeService.BAD_SYMBOL_LIST;
 
-/**
- * AccountProfitService
- *
- * Ez az osztály felel a tradek kezeléséért és a profit statisztikák számításáért.
- *
- * - Binance-től érkező order frissítések feldolgozása
- * - LIMIT és MARKET megbízások életciklusának kezelése
- * - Aktív és függő tradek nyilvántartása
- * - Profit, veszteség és win rate számítása
- * - Trade záráskor események küldése (pl. Telegram)
- * - Összefoglaló riport készítése az aktuális helyzetről
- * - Veszteséges szimbólumok nyilvántartása (bad symbols)
- *
- * handleOrderUpdate()
- * ├── handleLimitOrder()
- * │   ├── handleLimitOrderNew()
- * │   ├── handleLimitOrderPartiallyFilled()
- * │   ├── handleLimitOrderFilled()
- * │   └── handleLimitOrderCanceled()
- * └── handleMarketOrder()
- *     ├── handleMarketOrderFilled()
- *     └── handleMarketOrderExecution()
- */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -60,6 +41,7 @@ public class HandleOrderUpdateService {
 
     final TradeService tradeService;
     final ApplicationEventPublisher publisher;
+    final PythonMLService pythonMLService; // NEW: ML service dependency
 
     double profit = 0.0;
     int winTrades = 0;
@@ -261,6 +243,104 @@ public class HandleOrderUpdateService {
         if (realizedProfit < 0.0) {
             BAD_SYMBOL_LIST.add(new BadSymbolsDto(symbol, LocalDateTime.now()));
         }
+
+        // NEW: Send trade result to ML for learning
+        sendTradeResultToML(symbol, order, realizedProfit);
+    }
+
+    /**
+     * Send trade result to Python ML service for continuous learning
+     */
+    private void sendTradeResultToML(String symbol, OrderTradeUpdateDto.Order order, double realizedProfit) {
+        try {
+            // Find the original trade to get entry details
+            Optional<OrderDto> originalTrade = findOriginalTradeForSymbol(symbol);
+
+            if (originalTrade.isEmpty()) {
+                log.warn("🤖 Cannot send ML feedback - original trade not found for {}", symbol);
+                return;
+            }
+
+            OrderDto trade = originalTrade.get();
+
+            // Calculate trade duration
+            Duration tradeDuration = Duration.between(trade.getStarted(), LocalDateTime.now());
+
+            // Calculate percentage return
+            BigDecimal entryPrice = trade.getPrice();
+            BigDecimal exitPrice = getActualFillPrice(order);
+            BigDecimal quantity = trade.getExecutedQty();
+
+            double entryValue = entryPrice.multiply(quantity).doubleValue();
+            double percentReturn = (realizedProfit / entryValue) * 100.0;
+
+            // Create ML trade result
+            MLTradeResult tradeResult = MLTradeResult.builder()
+                    .symbol(symbol)
+                    .entryTime(trade.getStarted())
+                    .exitTime(LocalDateTime.now())
+                    .side(determineTradeSide(order))
+                    .entryPrice(entryPrice.doubleValue())
+                    .exitPrice(exitPrice.doubleValue())
+                    .quantity(quantity.doubleValue())
+                    .realizedPnl(realizedProfit)
+                    .pnlPercent(percentReturn)
+                    .durationMinutes((int) tradeDuration.toMinutes())
+                    .isWinning(realizedProfit > 0)
+                    .build();
+
+            // Send to ML service asynchronously
+            pythonMLService.submitTradeResult(tradeResult)
+                    .thenAccept(success -> {
+                        if (success) {
+                            log.info("🤖 ML feedback sent successfully for {} trade: {:.2f}% return",
+                                    symbol, percentReturn);
+                        } else {
+                            log.warn("🤖 ML feedback failed for {} trade", symbol);
+                        }
+                    })
+                    .handle((result, throwable) -> {
+                        if (throwable != null) {
+                            log.error("🤖 ML feedback error for {} trade: {}", symbol, throwable.getMessage());
+                        }
+                        return null; // handle() metódus esetén bármit visszaadhatsz
+                    });
+
+        } catch (Exception e) {
+            log.error("🤖 Error creating ML trade feedback for {}: {}", symbol, e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Find the original trade that opened this position
+     */
+    private Optional<OrderDto> findOriginalTradeForSymbol(String symbol) {
+        // First check active trades
+        Optional<OrderDto> activeTrade = TradeService.activeOrderList.stream()
+                .filter(o -> symbol.equals(o.getSymbol()))
+                .findFirst();
+
+        if (activeTrade.isPresent()) {
+            return activeTrade;
+        }
+
+        // Fallback: check recent historical trades (if you keep a history)
+        // This could be implemented based on your trade history storage
+
+        return Optional.empty();
+    }
+
+    /**
+     * Determine the trading side from the order
+     */
+    private String determineTradeSide(OrderTradeUpdateDto.Order order) {
+        // For closing orders, the side is opposite to the position
+        if (SIDE_BUY.equals(order.S)) {
+            return "SHORT"; // We're buying to close a short position
+        } else if (SIDE_SELL.equals(order.S)) {
+            return "LONG"; // We're selling to close a long position
+        }
+        return "UNKNOWN";
     }
 
     /**
@@ -301,9 +381,7 @@ public class HandleOrderUpdateService {
     }
 
     public String getTrades() {
-
         // összefoglaló riport
-
         String sb = "*Active trades: " +
                 TradeService.getActiveOrderList().stream()
                         .map(OrderDto::getSymbol)
