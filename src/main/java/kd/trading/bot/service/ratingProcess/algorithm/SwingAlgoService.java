@@ -112,7 +112,7 @@ public class SwingAlgoService {
                     analysis.setMlPrediction(mlPrediction);
                     analysis.setMlConfidence(mlPrediction.getConfidence());
 
-                    log.info("🤖 ML Analysis for {}: Signal={}, Confidence={:.2f}, RSI={:.1f}, MACD={}, Volume={:.0f}",
+                    log.info("🤖 ML Analysis for {}: Signal={}, Confidence={}, RSI={}, MACD={}, Volume={}",
                             symbol, mlPrediction.getPredictedSignal(), mlPrediction.getConfidence(),
                             indicators.getRsi(), indicators.isMacdBullish() ? "BULL" : "BEAR",
                             indicators.getVolumeRatio());
@@ -133,7 +133,7 @@ public class SwingAlgoService {
                     analysis = createNoTradeAnalysis(symbol, lastPrice, "ML prediction failed");
                 }
             } else {
-                log.debug("📊 Technical Analysis for {}: RSI={:.1f}, MACD={}, Volume={:.1fx (ML disabled)",
+                log.debug("📊 Technical Analysis for {}: RSI={}, MACD={}, Volume={}",
                         symbol, indicators.getRsi(), indicators.isMacdBullish() ? "BULL" : "BEAR", indicators.getVolumeRatio());
                 analysis = createNoTradeAnalysis(symbol, lastPrice, "ML disabled");
             }
@@ -327,11 +327,11 @@ public class SwingAlgoService {
     // === HELPER METHODS FOR NUMERICAL CONVERSION ===
 
     private double convertTrendToScore(String trend) {
-        switch (trend) {
-            case "BULLISH": return 1.0;
-            case "BEARISH": return -1.0;
-            default: return 0.0;
-        }
+        return switch (trend) {
+            case "BULLISH" -> 1.0;
+            case "BEARISH" -> -1.0;
+            default -> 0.0;
+        };
     }
 
     private double calculateRsiMomentumScore(TechnicalIndicators indicators) {
