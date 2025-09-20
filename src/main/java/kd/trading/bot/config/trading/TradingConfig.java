@@ -2,21 +2,22 @@ package kd.trading.bot.config.trading;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-import java.util.Set;
+import java.util.List;
+
 
 @ConfigurationProperties(prefix = "trading")
 public record TradingConfig(
         Boolean enabled,
         Double stopLimit,
         Double winLimit,
-        String tradeWithPercent,
         Double moneyUsdt,
         Integer maxTrade,
         String coinType,
         Integer coinMinMonth,
         Integer leverage,
         Double swipeValue,
-        Set<String> banSymbol,
+        List<String> banSymbol,  // Set helyett List
         String evaluationInterval
 ) {
+
 }

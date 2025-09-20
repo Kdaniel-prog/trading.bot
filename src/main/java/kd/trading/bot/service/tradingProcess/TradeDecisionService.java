@@ -25,7 +25,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 @FieldDefaults(level = AccessLevel.PRIVATE)
 public class TradeDecisionService {
-    final TradingConfig tradingConfig;
+    private final TradingConfig tradingConfig;
 
     // === CALCULATION DIVISORS ===
     static final BigDecimal DIVIDE_BY_TWO = BigDecimal.valueOf(2);

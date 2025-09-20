@@ -24,7 +24,6 @@ import java.net.URISyntaxException;
 @RequiredArgsConstructor
 @Slf4j
 @FieldDefaults(level = AccessLevel.PRIVATE)
-@ConditionalOnProperty(name = "trading.enabled", havingValue = "true", matchIfMissing = false)
 public class TradingBot implements MarketDataListener, AccountDataListener {
 
     final TradableSymbolService tradableSymbolService;
@@ -57,7 +56,7 @@ public class TradingBot implements MarketDataListener, AccountDataListener {
     }
 
     private void startTradingBot() throws URISyntaxException {
-        log.info("🤖 Starting TradingBot with config: {}", tradingConfig.getRiskSummary());
+        log.info("🤖 Starting TradingBot");
 
         // 0. Load active trades (if app restart we will load the trades)
         tradeService.loadActiveOrdersOnStartup();
@@ -171,20 +170,4 @@ public class TradingBot implements MarketDataListener, AccountDataListener {
         }
     }
 
-    /**
-     * Get trading status summary
-     */
-    public String getStatus() {
-        if (!tradingConfig.isLiveTradingEnabled()) {
-            return "DISABLED (trading.enabled=false)";
-        }
-
-        if (isRunning) {
-            return String.format("RUNNING - Active trades: %d, Risk: %s",
-                    TradeService.getActiveOrderList().size(),
-                    tradingConfig.getRiskSummary());
-        }
-
-        return "STOPPED";
-    }
 }
