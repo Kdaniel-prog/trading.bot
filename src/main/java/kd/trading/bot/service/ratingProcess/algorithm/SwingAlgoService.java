@@ -642,11 +642,82 @@ public class SwingAlgoService {
             Map<String, Double> syntheticProbabilities = generateSyntheticProbabilities(direction, score);
             analysis.setProbabilities(syntheticProbabilities);
 
+            // ENHANCED: Calculate ML confidence using multiple factors
+            double mlConfidence = calculateSyntheticMLConfidence(direction, score, indicators, syntheticProbabilities);
+            analysis.setMlConfidence(mlConfidence);
+
+            // Set analysis reason for debugging
+            analysis.setAnalysisReason(String.format("Backtest: %s signal (score=%.1f, conf=%.2f)",
+                    direction, score, mlConfidence));
+
+            log.debug("Historical analysis for {}: direction={}, score={}, mlConfidence={}, probabilities={}",
+                    symbol, direction, score, mlConfidence, syntheticProbabilities);
+
             return analysis;
         } catch (Exception e) {
             log.error("Failed to analyze historical coin {}: {}", symbol, e.getMessage());
             return createNoTradeAnalysis(symbol, lastPrice, "Historical analysis failed");
         }
+    }
+
+    /**
+     * Calculate synthetic ML confidence for backtesting
+     * This mimics real ML confidence based on technical analysis strength
+     */
+    private double calculateSyntheticMLConfidence(Direction direction, double score,
+                                                  TechnicalIndicators indicators,
+                                                  Map<String, Double> probabilities) {
+        if (direction == Direction.HOLD) {
+            return 0.0; // No confidence for HOLD signals
+        }
+
+        // Base confidence from probabilities
+        String directionKey = direction.toString();
+        double baseConfidence = probabilities.getOrDefault(directionKey, 0.0);
+
+        // Enhance confidence based on technical strength
+        double technicalBonus = 0.0;
+
+        // Trend alignment bonus
+        if (indicators.isTrendAlignment()) {
+            technicalBonus += 0.1;
+        }
+
+        // Strong momentum bonus
+        if (direction == Direction.LONG) {
+            if (indicators.isMacdBullish() && indicators.getRsi() > 40 && indicators.getRsi() < 70) {
+                technicalBonus += 0.15;
+            }
+        } else if (direction == Direction.SHORT) {
+            if (indicators.isMacdBearish() && indicators.getRsi() > 30 && indicators.getRsi() < 60) {
+                technicalBonus += 0.15;
+            }
+        }
+
+        // Volume confirmation bonus
+        if (indicators.getVolumeRatio() > 1.3) {
+            technicalBonus += 0.1;
+        }
+
+        // Good risk/reward bonus
+        if (indicators.getRiskRewardRatio() > 2.0) {
+            technicalBonus += 0.1;
+        }
+
+        // Score-based adjustment (score 0-10 maps to confidence adjustment -0.2 to +0.2)
+        double scoreAdjustment = (score - 5.0) / 25.0; // -0.2 to +0.2
+
+        // Calculate final confidence
+        double finalConfidence = baseConfidence + technicalBonus + scoreAdjustment;
+
+        // Ensure confidence is within reasonable bounds for backtest
+        finalConfidence = Math.max(0.1, Math.min(0.95, finalConfidence));
+
+        // Add some randomization to make it more realistic (±5%)
+        double randomFactor = 1.0 + (Math.random() - 0.5) * 0.1; // 0.95 to 1.05
+        finalConfidence *= randomFactor;
+
+        return Math.max(0.1, Math.min(0.95, finalConfidence));
     }
 
     /**
