@@ -12,6 +12,9 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 @AllArgsConstructor
 public class TechnicalIndicators {
 
+    @JsonProperty("currentPrice")
+    private double currentPrice;
+
     // === TREND INDICATORS ===
     @JsonProperty("ema20_4h")
     private double ema20_4h;
@@ -268,6 +271,56 @@ public class TechnicalIndicators {
         }
 
         return Math.max(0.0, Math.min(1.0, confidence));
+    }
+
+    /**
+     * Check if market structure is bullish
+     */
+    public boolean isBullishMarketStructure() {
+        return bullishStructure || (higherHighs && higherLows);
+    }
+
+    /**
+     * Check if market structure is bearish
+     */
+    public boolean isBearishMarketStructure() {
+        return bearishStructure || (lowerLows && lowerHighs);
+    }
+
+    /**
+     * Overall technical score (-100 to +100)
+     * Positive = bullish, Negative = bearish
+     */
+    public double getTechnicalScore() {
+        double bullishScore = getBullishScore();
+        double bearishScore = getBearishScore();
+        double riskScore = getRiskScore();
+
+        // Base score from bullish vs bearish
+        double baseScore = bullishScore - bearishScore;
+
+        // Apply risk penalty
+        double riskPenalty = riskScore * 0.5;
+        double adjustedScore = baseScore - riskPenalty;
+
+        // Ensure score is within bounds
+        return Math.max(-100.0, Math.min(100.0, adjustedScore));
+    }
+
+    /**
+     * Get technical analysis summary
+     */
+    public String getSummary() {
+        StringBuilder summary = new StringBuilder();
+
+        summary.append(String.format("Market: %s | ", getMarketCondition()));
+        summary.append(String.format("RSI: %.1f | ", rsi));
+        summary.append(String.format("MACD: %s | ", macdBullish ? "BULL" : (macdBearish ? "BEAR" : "NEUT")));
+        summary.append(String.format("Volume: %.1fx | ", volumeRatio));
+        summary.append(String.format("Risk: %.0f/100 | ", getRiskScore()));
+        summary.append(String.format("Confidence: %.0f%%", getTradingConfidence() * 100));
+
+        return summary.toString();
     }
 
     @Override

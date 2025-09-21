@@ -111,7 +111,7 @@ public class BacktestTestService {
                                 symbol, timeframe, startDate, endDate);
 
                         if (result.isSuccess()) {
-                            log.info("SUCCESS: {} trades, {:.2f}% return, {:.1f}% win rate",
+                            log.info("SUCCESS: {} trades, {}% return, {}% win rate",
                                     result.getTotalTrades(),
                                     result.getTotalReturnPercent(),
                                     result.getWinRate());

@@ -426,15 +426,22 @@ public class SwingAlgoService {
 
             double currentPrice = closes4h.get(closes4h.size() - 1);
 
-            // Same calculation as live analysis
+            // Calculate all technical indicators
             TechnicalIndicators indicators = calculateAllIndicators(
                     closes4h, highs4h, lows4h, volumes4h,
-                    closesDaily, closesHourly, closes4h, highs4h, lows4h, currentPrice // Use 4h for 15m approximation
+                    closesDaily, closesHourly,
+                    closes4h, highs4h, lows4h, // Use 4h for 15m approximation
+                    currentPrice
             );
 
-            // Create analysis result (NO ML for historical - pure traditional for backtesting)
-            CoinAnalysis analysis = new CoinAnalysis(symbol, 0.0, Signal.NO_TRADE, lastPrice);
+            // BACKTEST MODE: Generate signals for training data
+            Signal signal = generateBacktestSignal(indicators);
+            double score = calculateSignalScore(indicators, signal);
+
+            // Create analysis result with ACTUAL SIGNALS for backtesting
+            CoinAnalysis analysis = new CoinAnalysis(symbol, score, signal, lastPrice);
             analysis.setTechnicalIndicators(indicators);
+            analysis.setTradingRule(signal != Signal.NO_TRADE ? 1 : 0);
 
             return analysis;
 
@@ -442,6 +449,84 @@ public class SwingAlgoService {
             log.error("Failed to analyze historical coin {}: {}", symbol, e.getMessage());
             return createNoTradeAnalysis(symbol, lastPrice, "Historical analysis failed");
         }
+    }
+
+    private double calculateSignalScore(TechnicalIndicators indicators, Signal signal) {
+        if (signal == Signal.NO_TRADE) {
+            return 0.0;
+        }
+
+        double score = 5.0; // Base score
+
+        if (signal == Signal.LONG) {
+            // Trend bonus
+            if ("BULLISH".equals(indicators.getPrimaryTrend())) score += 2.0;
+            if ("BULLISH".equals(indicators.getShortTermTrend())) score += 1.0;
+            if (indicators.isTrendAlignment()) score += 1.0;
+
+            // Momentum bonus
+            if (indicators.getRsi() > 30 && indicators.getRsi() < 70) score += 1.0;
+            if (indicators.isMacdBullish()) score += 1.5;
+            if (indicators.isRsiRising()) score += 0.5;
+
+            // Volume bonus
+            if (indicators.getVolumeRatio() > 1.3) score += 1.0;
+            if (indicators.isVolumeBreakout()) score += 0.5;
+
+            // Risk adjustment
+            if (indicators.getRiskRewardRatio() > 2.0) score += 1.0;
+            if (indicators.getVolatilityPercent() < 8.0) score += 0.5;
+
+        } else if (signal == Signal.SHORT) {
+            // Mirror logic for SHORT
+            if ("BEARISH".equals(indicators.getPrimaryTrend())) score += 2.0;
+            if ("BEARISH".equals(indicators.getShortTermTrend())) score += 1.0;
+            if (indicators.isTrendAlignment()) score += 1.0;
+
+            if (indicators.getRsi() > 30 && indicators.getRsi() < 70) score += 1.0;
+            if (indicators.isMacdBearish()) score += 1.5;
+            if (!indicators.isRsiRising()) score += 0.5;
+
+            if (indicators.getVolumeRatio() > 1.3) score += 1.0;
+            if (indicators.isVolumeBreakout()) score += 0.5;
+
+            if (indicators.getRiskRewardRatio() > 2.0) score += 1.0;
+            if (indicators.getVolatilityPercent() < 8.0) score += 0.5;
+        }
+
+        // Cap between 0-10
+        return Math.max(0.0, Math.min(10.0, score));
+    }
+
+    // ÚJ metódus hozzáadása:
+    private Signal generateBacktestSignal(TechnicalIndicators indicators) {
+        // Egyszerű signál generálás backtesthez
+        double bullScore = 0.0;
+        double bearScore = 0.0;
+
+        // Trend
+        if ("BULLISH".equals(indicators.getPrimaryTrend())) bullScore += 2.0;
+        if ("BEARISH".equals(indicators.getPrimaryTrend())) bearScore += 2.0;
+
+        // RSI
+        if (indicators.getRsi() < 35) bullScore += 2.0;
+        if (indicators.getRsi() > 65) bearScore += 2.0;
+
+        // MACD
+        if (indicators.isMacdBullish()) bullScore += 1.5;
+        if (indicators.isMacdBearish()) bearScore += 1.5;
+
+        // Volume
+        if (indicators.getVolumeRatio() > 1.3) {
+            bullScore += 1.0;
+            bearScore += 1.0;
+        }
+
+        // ALACSONY küszöbök több signal generáláshoz
+        if (bullScore >= 3.0 && bullScore > bearScore) return Signal.LONG;
+        if (bearScore >= 3.0 && bearScore > bullScore) return Signal.SHORT;
+
+        return Signal.NO_TRADE;
     }
 
     // === HELPER METHODS ===

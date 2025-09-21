@@ -167,7 +167,7 @@ class TrainingDataGenerator:
 
     def generate_training_dataset(self, symbols_limit=10, months_back=6, timeframe="4h"):
         """
-        Generate comprehensive training dataset
+        Generate comprehensive training dataset - FIXED DATES
         """
         # Get available symbols
         all_symbols = self.get_available_symbols()
@@ -180,20 +180,22 @@ class TrainingDataGenerator:
         symbols = all_symbols[:symbols_limit]
         print(f"Using {len(symbols)} symbols for training: {symbols}")
 
-        # Date range
-        end_date = datetime.now()
+        # FIXED Date range - 2024-es évek használata
+        from datetime import datetime, timedelta
+
+        end_date = datetime(2024, 9, 20)  # Fixed end date in 2024
         start_date = end_date - timedelta(days=months_back * 30)
 
-        print(f"Date range: {start_date.date()} to {end_date.date()}")
+        print(f"FIXED Date range: {start_date.date()} to {end_date.date()}")
 
         all_training_samples = []
         successful_backtests = 0
 
         # Run backtests for each symbol
         for i, symbol in enumerate(symbols):
-            print(f"\n--- Processing {i+1}/{len(symbols)}: {symbol} ---")
+            print(f"\n--- Processing {i + 1}/{len(symbols)}: {symbol} ---")
 
-            # Run backtest
+            # Run backtest with fixed dates
             backtest_result = self.run_backtest(symbol, timeframe, start_date, end_date)
 
             if backtest_result:

@@ -245,7 +245,7 @@ public class FeatherDataLoader {
      */
     public List<String> getAvailableSymbols() {
         try {
-            Resource resource = resourceLoader.getResource("classpath:data");
+            Resource resource = resourceLoader.getResource("classpath:data/feather");
             File dataDir = resource.getFile(); // csak akkor működik, ha futtatás közben kicsomagolva van
             if (!dataDir.exists() || !dataDir.isDirectory()) {
                 log.warn("Data directory not found: {}", dataDir.getAbsolutePath());

@@ -38,7 +38,7 @@ backtest:
   # Data Configuration - Use resources directory
   data:
     feather:
-      directory: src/main/resources/data  # Changed from src/main/python/data
+      directory: src/main/resources/data/feather
 
   # Python Configuration
   python:

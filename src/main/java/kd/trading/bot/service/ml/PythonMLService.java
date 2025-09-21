@@ -33,10 +33,10 @@ public class PythonMLService {
     @Value("${python.ml.timeout:10}")
     private int timeoutSeconds;
 
-    @Value("${python.ml.models.path:src/main/python/models}")
+    @Value("${python.ml.models.path:src/resource/models}")
     private String modelsPath;
 
-    @Value("${python.ml.data.path:src/main/python/data}")
+    @Value("${python.ml.data.path:src/resource/data}")
     private String dataPath;
 
     /**
