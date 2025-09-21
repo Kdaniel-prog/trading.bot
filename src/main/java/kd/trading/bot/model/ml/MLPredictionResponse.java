@@ -1,9 +1,12 @@
 package kd.trading.bot.model.ml;
 
+import kd.trading.bot.enums.Direction;
 import kd.trading.bot.enums.Signal;
+import kd.trading.bot.service.ratingProcess.algorithm.SwingAlgoService;
 import lombok.Builder;
 import lombok.Data;
 import java.time.LocalDateTime;
+import java.util.Map;
 
 @Data
 @Builder
@@ -12,6 +15,8 @@ public class MLPredictionResponse {
     private String modelVersion;
     private String modelName;
     private Double modelConfidence;
+    private Direction direction;              // ÚJ
+    private Map<String, Double> probabilities; // ÚJ
 
     // Input features used for prediction
     private MLFeatures features;

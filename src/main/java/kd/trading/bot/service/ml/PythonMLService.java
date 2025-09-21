@@ -33,7 +33,7 @@ public class PythonMLService {
     @Value("${python.ml.timeout:10}")
     private int timeoutSeconds;
 
-    @Value("${python.ml.models.path:src/resource/models}")
+    @Value("${python.ml.models.path:src/resource/data/models}")
     private String modelsPath;
 
     @Value("${python.ml.data.path:src/resource/data}")
@@ -45,7 +45,7 @@ public class PythonMLService {
     @Async
     public CompletableFuture<Boolean> submitTradeResult(MLTradeResult tradeResult) {
         try {
-            log.debug("Sending trade result to Python ML: {} - {:.2f}% return",
+            log.debug("Sending trade result to Python ML: {} - {} return",
                     tradeResult.getSymbol(), tradeResult.getPnlPercent());
 
             // Send directly to Python for immediate learning

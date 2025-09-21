@@ -1,5 +1,6 @@
 package kd.trading.bot.model.backtest;
 
+import kd.trading.bot.enums.Direction;
 import kd.trading.bot.enums.Signal;
 import kd.trading.bot.model.CoinAnalysis;
 import lombok.AllArgsConstructor;
@@ -18,6 +19,7 @@ public class BacktestTrade {
 
     private String symbol;
     private Signal side; // LONG or SHORT
+    private Direction direction;
 
     // Entry details
     private double entryPrice;

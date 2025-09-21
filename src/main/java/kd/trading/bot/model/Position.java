@@ -1,5 +1,6 @@
 package kd.trading.bot.model;
 
+import kd.trading.bot.enums.Direction;
 import kd.trading.bot.enums.Signal;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -17,6 +18,7 @@ public class Position {
 
     private String symbol;
     private Signal side; // LONG or SHORT
+    private Direction direction;
 
     // Entry details
     private double entryPrice;

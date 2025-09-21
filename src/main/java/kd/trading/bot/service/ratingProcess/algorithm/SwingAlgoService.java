@@ -1,6 +1,7 @@
 package kd.trading.bot.service.ratingProcess.algorithm;
 
 import kd.trading.bot.api.BinanceRestClient;
+import kd.trading.bot.enums.Direction;
 import kd.trading.bot.enums.Signal;
 import kd.trading.bot.model.*;
 import kd.trading.bot.model.ml.MLPredictionResponse;
@@ -8,7 +9,6 @@ import kd.trading.bot.service.ml.PythonMLService;
 import kd.trading.bot.telegram.eventType.TradeClosedUpdateEvent;
 import kd.trading.bot.util.IndicatorUtil;
 import lombok.AccessLevel;
-import lombok.AllArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
@@ -106,35 +106,56 @@ public class SwingAlgoService {
                     // Wait for ML result (max 5 seconds)
                     MLPredictionResponse mlPrediction = mlFuture.get(5, java.util.concurrent.TimeUnit.SECONDS);
 
+
                     // Apply ML decision
                     analysis.setScore(mlPrediction.getConfidence() * 10);
-                    analysis.setSignal(mlPrediction.getPredictedSignal());
+                    analysis.setSignal(convertDirectionToSignal(mlPrediction.getDirection()));
                     analysis.setMlPrediction(mlPrediction);
                     analysis.setMlConfidence(mlPrediction.getConfidence());
 
-                    log.info("🤖 ML Analysis for {}: Signal={}, Confidence={}, RSI={}, MACD={}, Volume={}",
-                            symbol, mlPrediction.getPredictedSignal(), mlPrediction.getConfidence(),
-                            indicators.getRsi(), indicators.isMacdBullish() ? "BULL" : "BEAR",
-                            indicators.getVolumeRatio());
+                    // Set directional info
+                    analysis.setDirection(mlPrediction.getDirection());
+                    analysis.setProbabilities(mlPrediction.getProbabilities());
 
-                    // Log for backtesting/debugging
-                    if (mlPrediction.getPredictedSignal() != Signal.NO_TRADE) {
+                    log.info("🤖 ML Directional Analysis for {}: Direction={}, Confidence={}, " +
+                                    "LONG={}%, SHORT={}%, HOLD={}%",
+                            symbol,
+                            mlPrediction.getDirection(),
+                            mlPrediction.getConfidence(),
+                            mlPrediction.getProbabilities().getOrDefault("LONG", 0.0) * 100,
+                            mlPrediction.getProbabilities().getOrDefault("SHORT", 0.0) * 100,
+                            mlPrediction.getProbabilities().getOrDefault("HOLD", 0.0) * 100);
+
+                    // Enhanced logging for trading decisions
+                    if (mlPrediction.getDirection() != Direction.HOLD) {
                         String logMessage = String.format(
-                                "ML Trading Signal for %s: %s (%.2f confidence) | RSI: %.1f | MACD: %s | Volume: %.1fx | RR: %.2f",
-                                symbol, mlPrediction.getPredictedSignal(), mlPrediction.getConfidence(),
-                                indicators.getRsi(), indicators.isMacdBullish() ? "BULLISH" : "BEARISH",
-                                indicators.getVolumeRatio(), indicators.getRiskRewardRatio()
+                                "ML Trading Signal for %s: %s (%.1f%% confidence) | " +
+                                        "RSI: %.1f | MACD: %s | Volume: %.1fx | RR: %.2f | " +
+                                        "Probabilities [L:%.1f%%, S:%.1f%%, H:%.1f%%]",
+                                symbol,
+                                mlPrediction.getDirection(),
+                                mlPrediction.getConfidence() * 100,
+                                indicators.getRsi(),
+                                indicators.isMacdBullish() ? "BULLISH" : "BEARISH",
+                                indicators.getVolumeRatio(),
+                                indicators.getRiskRewardRatio(),
+                                mlPrediction.getProbabilities().getOrDefault("LONG", 0.0) * 100,
+                                mlPrediction.getProbabilities().getOrDefault("SHORT", 0.0) * 100,
+                                mlPrediction.getProbabilities().getOrDefault("HOLD", 0.0) * 100
                         );
                         logTradingDecision(logMessage);
                     }
 
                 } catch (Exception e) {
-                    log.warn("⚠️ ML prediction failed for {}, using NO_TRADE: {}", symbol, e.getMessage());
+                    log.warn("⚠️ ML directional prediction failed for {}, using NO_TRADE: {}",
+                            symbol, e.getMessage());
                     analysis = createNoTradeAnalysis(symbol, lastPrice, "ML prediction failed");
                 }
             } else {
                 log.debug("📊 Technical Analysis for {}: RSI={}, MACD={}, Volume={}",
-                        symbol, indicators.getRsi(), indicators.isMacdBullish() ? "BULL" : "BEAR", indicators.getVolumeRatio());
+                        symbol, indicators.getRsi(),
+                        indicators.isMacdBullish() ? "BULL" : "BEAR",
+                        indicators.getVolumeRatio());
                 analysis = createNoTradeAnalysis(symbol, lastPrice, "ML disabled");
             }
 
@@ -144,6 +165,178 @@ public class SwingAlgoService {
             log.error("Failed to analyze coin {}: {}", symbol, e.getMessage(), e);
             return createNoTradeAnalysis(symbol, lastPrice, "Analysis failed: " + e.getMessage());
         }
+    }
+
+    /**
+     * Generate directional signals for backtesting/training
+     */
+    private Direction generateBacktestDirectionalSignal(TechnicalIndicators indicators) {
+        double longScore = 0.0;
+        double shortScore = 0.0;
+        double holdScore = 2.0; // Bias towards HOLD for conservative approach
+
+        // === TREND ANALYSIS ===
+        if ("BULLISH".equals(indicators.getPrimaryTrend())) {
+            longScore += 2.5;
+            if ("BULLISH".equals(indicators.getShortTermTrend())) {
+                longScore += 1.5; // Trend alignment
+            }
+        } else if ("BEARISH".equals(indicators.getPrimaryTrend())) {
+            shortScore += 2.5;
+            if ("BEARISH".equals(indicators.getShortTermTrend())) {
+                shortScore += 1.5; // Trend alignment
+            }
+        }
+
+        // === MOMENTUM ANALYSIS ===
+        double rsi = indicators.getRsi();
+
+        // RSI oversold/overbought conditions
+        if (rsi < 35 && rsi > 25) {
+            longScore += 2.0; // Potential bounce
+        } else if (rsi > 65 && rsi < 75) {
+            shortScore += 2.0; // Potential reversal
+        }
+
+        // RSI trend
+        if (indicators.isRsiRising() && rsi > 40) {
+            longScore += 1.0;
+        } else if (!indicators.isRsiRising() && rsi < 60) {
+            shortScore += 1.0;
+        }
+
+        // MACD signals
+        if (indicators.isMacdBullish() && indicators.getMacdHistogram() > 0) {
+            longScore += 1.5;
+        } else if (indicators.isMacdBearish() && indicators.getMacdHistogram() < 0) {
+            shortScore += 1.5;
+        }
+
+        // === VOLUME CONFIRMATION ===
+        if (indicators.getVolumeRatio() > 1.4) {
+            // Strong volume supports both directions
+            longScore += 1.0;
+            shortScore += 1.0;
+        } else if (indicators.getVolumeRatio() < 0.8) {
+            // Low volume - prefer HOLD
+            holdScore += 1.0;
+        }
+
+        // === MARKET STRUCTURE ===
+        if (indicators.isBullishStructure()) {
+            longScore += 1.5;
+        } else if (indicators.isBearishStructure()) {
+            shortScore += 1.5;
+        } else if (indicators.isConsolidation()) {
+            holdScore += 1.5;
+        }
+
+        // === RISK/REWARD ANALYSIS ===
+        if (indicators.getRiskRewardRatio() < 1.2) {
+            holdScore += 1.0; // Poor risk/reward
+        } else if (indicators.getRiskRewardRatio() > 2.0) {
+            // Good risk/reward supports current trend
+            if (longScore > shortScore) {
+                longScore += 1.0;
+            } else if (shortScore > longScore) {
+                shortScore += 1.0;
+            }
+        }
+
+        // === VOLATILITY FILTER ===
+        if (indicators.getVolatilityPercent() > 8.0) {
+            holdScore += 0.5; // High volatility - be cautious
+        }
+
+        // === DECISION LOGIC ===
+        double maxScore = Math.max(Math.max(longScore, shortScore), holdScore);
+        double threshold = 3.5; // Minimum score for action
+
+        // Require clear winner with sufficient confidence
+        if (maxScore < threshold) {
+            return Direction.HOLD;
+        }
+
+        if (longScore == maxScore && longScore > shortScore + 0.5) {
+            return Direction.LONG;
+        } else if (shortScore == maxScore && shortScore > longScore + 0.5) {
+            return Direction.SHORT;
+        } else {
+            return Direction.HOLD; // Too close to call
+        }
+    }
+
+    /**
+     * Generate synthetic probabilities for training data
+     */
+    private Map<String, Double> generateSyntheticProbabilities(Direction direction, double score) {
+        Map<String, Double> probabilities = new HashMap<>();
+
+        // Convert score (0-10) to confidence (0.5-0.95)
+        double confidence = Math.min(0.95, 0.5 + (score / 10.0) * 0.45);
+
+        if (direction == Direction.LONG) {
+            probabilities.put("LONG", confidence);
+            probabilities.put("SHORT", (1.0 - confidence) * 0.3);
+            probabilities.put("HOLD", (1.0 - confidence) * 0.7);
+        } else if (direction == Direction.SHORT) {
+            probabilities.put("SHORT", confidence);
+            probabilities.put("LONG", (1.0 - confidence) * 0.3);
+            probabilities.put("HOLD", (1.0 - confidence) * 0.7);
+        } else {
+            probabilities.put("HOLD", 0.7);
+            probabilities.put("LONG", 0.15);
+            probabilities.put("SHORT", 0.15);
+        }
+
+        return probabilities;
+    }
+
+    /**
+     * Calculate score for directional signal
+     */
+    private double calculateDirectionalSignalScore(TechnicalIndicators indicators, Direction direction) {
+        if (direction == Direction.HOLD) {
+            return 0.0;
+        }
+
+        double score = 5.0; // Base score
+
+        if (direction == Direction.LONG) {
+            // Long-specific scoring
+            if ("BULLISH".equals(indicators.getPrimaryTrend())) score += 2.0;
+            if ("BULLISH".equals(indicators.getShortTermTrend())) score += 1.0;
+            if (indicators.isTrendAlignment()) score += 1.0;
+
+            if (indicators.getRsi() > 30 && indicators.getRsi() < 70) score += 1.0;
+            if (indicators.isMacdBullish()) score += 1.5;
+            if (indicators.isRsiRising()) score += 0.5;
+
+            if (indicators.getVolumeRatio() > 1.3) score += 1.0;
+            if (indicators.isVolumeBreakout()) score += 0.5;
+
+            if (indicators.getRiskRewardRatio() > 2.0) score += 1.0;
+            if (indicators.getVolatilityPercent() < 8.0) score += 0.5;
+
+        } else if (direction == Direction.SHORT) {
+            // Short-specific scoring (mirror logic)
+            if ("BEARISH".equals(indicators.getPrimaryTrend())) score += 2.0;
+            if ("BEARISH".equals(indicators.getShortTermTrend())) score += 1.0;
+            if (indicators.isTrendAlignment()) score += 1.0;
+
+            if (indicators.getRsi() > 30 && indicators.getRsi() < 70) score += 1.0;
+            if (indicators.isMacdBearish()) score += 1.5;
+            if (!indicators.isRsiRising()) score += 0.5;
+
+            if (indicators.getVolumeRatio() > 1.3) score += 1.0;
+            if (indicators.isVolumeBreakout()) score += 0.5;
+
+            if (indicators.getRiskRewardRatio() > 2.0) score += 1.0;
+            if (indicators.getVolatilityPercent() < 8.0) score += 0.5;
+        }
+
+        // Cap between 0-10
+        return Math.max(0.0, Math.min(10.0, score));
     }
 
     /**
@@ -434,21 +627,37 @@ public class SwingAlgoService {
                     currentPrice
             );
 
-            // BACKTEST MODE: Generate signals for training data
-            Signal signal = generateBacktestSignal(indicators);
-            double score = calculateSignalScore(indicators, signal);
+            // BACKTEST MODE: Generate directional signals for training data
+            Direction direction = generateBacktestDirectionalSignal(indicators);
+            Signal signal = convertDirectionToSignal(direction);
+            double score = calculateDirectionalSignalScore(indicators, direction);
 
-            // Create analysis result with ACTUAL SIGNALS for backtesting
+            // Create analysis result with ACTUAL DIRECTIONAL SIGNALS for backtesting
             CoinAnalysis analysis = new CoinAnalysis(symbol, score, signal, lastPrice);
             analysis.setTechnicalIndicators(indicators);
-            analysis.setTradingRule(signal != Signal.NO_TRADE ? 1 : 0);
+            analysis.setDirection(direction);
+            analysis.setTradingRule(direction != Direction.HOLD ? 1 : 0);
+
+            // Set synthetic probabilities for training
+            Map<String, Double> syntheticProbabilities = generateSyntheticProbabilities(direction, score);
+            analysis.setProbabilities(syntheticProbabilities);
 
             return analysis;
-
         } catch (Exception e) {
             log.error("Failed to analyze historical coin {}: {}", symbol, e.getMessage());
             return createNoTradeAnalysis(symbol, lastPrice, "Historical analysis failed");
         }
+    }
+
+    /**
+     * Convert Direction enum to Signal enum for backwards compatibility
+     */
+    private Signal convertDirectionToSignal(Direction direction) {
+        return switch (direction) {
+            case LONG -> Signal.LONG;
+            case SHORT -> Signal.SHORT;
+            case HOLD -> Signal.NO_TRADE;
+        };
     }
 
     private double calculateSignalScore(TechnicalIndicators indicators, Signal signal) {

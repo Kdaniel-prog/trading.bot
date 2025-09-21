@@ -165,7 +165,7 @@ public class BacktestTestService {
                         .sorted((r1, r2) -> Double.compare(r2.getTotalReturnPercent(), r1.getTotalReturnPercent()))
                         .limit(3)
                         .forEach(result -> {
-                            log.info("  {}: {:.2f}% return, {:.1f}% win rate, {} trades",
+                            log.info("  {}: {}% return, {}% win rate, {} trades",
                                     result.getSymbol(),
                                     result.getTotalReturnPercent(),
                                     result.getWinRate(),
@@ -181,7 +181,7 @@ public class BacktestTestService {
                         .mapToDouble(BacktestResult::getWinRate)
                         .average().orElse(0.0);
 
-                log.info("AVERAGES: {:.2f}% return, {:.1f}% win rate", avgReturn, avgWinRate);
+                log.info("AVERAGES: {}% return, {}% win rate", avgReturn, avgWinRate);
             }
 
         } catch (Exception e) {
@@ -235,7 +235,7 @@ public class BacktestTestService {
                                 e1.getValue().getTotalTrades()))
                         .forEach(entry -> {
                             BacktestRuleAnalysis analysis = entry.getValue();
-                            log.info("  Rule {}: {} trades | {:.1f}% win rate | {:.2f}% avg PnL",
+                            log.info("  Rule {}: {} trades | {}% win rate | {}% avg PnL",
                                     analysis.getTradingRule(),
                                     analysis.getTotalTrades(),
                                     analysis.getWinRate(),
@@ -268,7 +268,7 @@ public class BacktestTestService {
             BacktestResult result = backtestService.runBacktest(symbol, timeframe, startDate, endDate);
 
             if (result.isSuccess()) {
-                log.info("Quick test result: {:.2f}% return, {:.1f}% win rate, {} trades",
+                log.info("Quick test result: {}% return, {}% win rate, {} trades",
                         result.getTotalReturnPercent(), result.getWinRate(), result.getTotalTrades());
             } else {
                 log.error("Quick test failed: {}", result.getErrorMessage());

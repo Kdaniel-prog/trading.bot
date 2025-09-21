@@ -1,5 +1,6 @@
 package kd.trading.bot.service.backtest;
 
+import kd.trading.bot.enums.Direction;
 import kd.trading.bot.enums.Signal;
 import kd.trading.bot.model.*;
 import kd.trading.bot.model.backtest.BacktestResult;
@@ -18,6 +19,9 @@ import java.time.ZoneOffset;
 import java.util.*;
 import java.util.stream.IntStream;
 
+import static kd.trading.bot.enums.OrderSide.BUY;
+import static kd.trading.bot.enums.OrderSide.SELL;
+
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -27,7 +31,7 @@ public class BacktestService {
     final SwingAlgoService swingAlgoService;
     final FeatherDataLoader featherDataLoader;
 
-    // Configuration from YAML - matched to your existing config structure
+    // Configuration from YAML
     @Value("${backtest.initial.balance:10000.0}")
     private double initialBalance;
 
@@ -37,18 +41,30 @@ public class BacktestService {
     @Value("${backtest.position.size.percent:0.1}")
     private double positionSizePercent;
 
-    // Risk management from your trading config
-    @Value("${backtest.risk.stop.loss.percent:#{T(Math).abs(${trading.stopLimit:3.0})}}")
+    // Updated risk management for directional trading
+    @Value("${backtest.risk.stop.loss.percent:3.0}")
     private double stopLossPercent;
 
-    @Value("${backtest.risk.take.profit.percent:${trading.winLimit:6.0}}")
+    @Value("${backtest.risk.take.profit.percent:6.0}")
     private double takeProfitPercent;
 
-    @Value("${backtest.risk.max.holding.hours:168}")
+    @Value("${backtest.risk.max.holding.hours:120}")
     private int maxHoldingHours;
 
+    // Directional trading thresholds
+    @Value("${backtest.directional.min.confidence:0.65}")
+    private double minDirectionalConfidence;
+
+    @Value("${backtest.directional.min.score:5.0}")
+    private double minDirectionalScore;
+
+    @Value("${backtest.directional.hold.exit.confidence:0.8}")
+    private double holdExitConfidence;
+
+    private final List<BacktestResult> backtestHistory = new ArrayList<>();
+
     public BacktestResult runBacktest(String symbol, String timeframe, LocalDateTime startDate, LocalDateTime endDate) {
-        log.info("Starting backtest for {} {} from {} to {}", symbol, timeframe, startDate, endDate);
+        log.info("Starting directional backtest for {} {} from {} to {}", symbol, timeframe, startDate, endDate);
 
         try {
             // 1. Load feather data
@@ -67,11 +83,11 @@ public class BacktestService {
             // 2. Create resampled data for multi-timeframe analysis
             Map<String, List<HistoricalCandle>> timeframeData = prepareTimeframeData(candleData, timeframe);
 
-            // 3. Run backtest simulation
-            BacktestResult result = simulateTrading(symbol, timeframe, timeframeData, startDate, endDate);
+            // 3. Run directional backtest simulation
+            BacktestResult result = simulateDirectionalTrading(symbol, timeframe, timeframeData, startDate, endDate);
 
-            log.info("Backtest completed for {}: Final PnL: {}%, Trades: {}",
-                    symbol, result.getTotalReturnPercent(), result.getTotalTrades());
+            log.info("Directional backtest completed for {}: Final PnL: {}%, Trades: {}, Hold Ratio: {}%",
+                    symbol, result.getTotalReturnPercent(), result.getTotalTrades(), result.getHoldRatio());
 
             return result;
 
@@ -109,15 +125,22 @@ public class BacktestService {
         return timeframeData;
     }
 
-    private BacktestResult simulateTrading(String symbol, String timeframe,
-                                           Map<String, List<HistoricalCandle>> timeframeData,
-                                           LocalDateTime startDate, LocalDateTime endDate) {
+    private BacktestResult simulateDirectionalTrading(String symbol, String timeframe,
+                                                      Map<String, List<HistoricalCandle>> timeframeData,
+                                                      LocalDateTime startDate, LocalDateTime endDate) {
 
         List<HistoricalCandle> mainData = timeframeData.get(timeframe);
         List<BacktestTrade> trades = new ArrayList<>();
 
         double currentBalance = initialBalance;
         Position currentPosition = null;
+
+        // Directional trading statistics
+        int totalSignals = 0;
+        int holdSignals = 0;
+        int longSignals = 0;
+        int shortSignals = 0;
+        int positionsOpened = 0;
 
         // Performance tracking
         List<Double> portfolioValues = new ArrayList<>();
@@ -138,36 +161,55 @@ public class BacktestService {
             int idx1h = findClosestIndex(timeframeData.get("1h"), currentCandle.getTimestamp());
 
             List<List<Object>> fourHourKlines = prepareKlinesSlice(timeframeData.get("4h"), idx4h, 300);
-            List<List<Object>> dailyKlines    = prepareKlinesSlice(timeframeData.get("1d"), idx1d, 200);
-            List<List<Object>> hourlyKlines   = prepareKlinesSlice(timeframeData.get("1h"), idx1h, 100);
+            List<List<Object>> dailyKlines = prepareKlinesSlice(timeframeData.get("1d"), idx1d, 200);
+            List<List<Object>> hourlyKlines = prepareKlinesSlice(timeframeData.get("1h"), idx1h, 100);
 
             // Skip if insufficient data
             if (fourHourKlines.size() < 100 || dailyKlines.size() < 50) {
                 continue;
             }
 
-            // Analyze using the same logic as live trading
+            // Analyze using directional logic
             CoinAnalysis analysis = swingAlgoService.analyzeHistoricalCoin(
                     symbol, currentPrice, fourHourKlines, dailyKlines, hourlyKlines);
 
-            // Position management
-            if (currentPosition == null && analysis.getSignal() != Signal.NO_TRADE) {
-                // Open new position
-                currentPosition = openPosition(symbol, analysis, currentPrice, currentBalance, currentCandle.getTimestamp());
-                currentBalance -= Math.abs(((Position) currentPosition).getPositionSize() * currentPrice * feeRate); // Entry fee
+            Direction direction = analysis.getDirection();
+            totalSignals++;
 
-            } else if (currentPosition != null) {
+            // Count directional signals
+            switch (direction) {
+                case HOLD -> holdSignals++;
+                case LONG -> longSignals++;
+                case SHORT -> shortSignals++;
+            }
+
+            // Position management with directional logic
+            // Position management with directional logic
+            if (currentPosition == null) {
+                // Open new position only for LONG or SHORT with sufficient confidence and score
+                double mlConfidence = analysis.getMlConfidence(); // Most Double, lehet null
+                if (direction != Direction.HOLD && analysis.getScore() >= minDirectionalScore && mlConfidence >= minDirectionalConfidence) {
+
+                    currentPosition = openDirectionalPosition(symbol, analysis, currentPrice,
+                            currentBalance, currentCandle.getTimestamp(), direction);
+                    currentBalance -= Math.abs(currentPosition.getPositionSize() * currentPrice * feeRate);
+                    positionsOpened++;
+
+                    logDirectionalTrade("OPEN", currentPosition, analysis, currentPrice, direction);
+                }
+            } else {
                 // Check exit conditions
-                boolean shouldExit = shouldExitPosition(currentPosition, analysis, currentPrice, currentCandle);
+                boolean shouldExit = shouldExitDirectionalPosition(currentPosition, analysis,
+                        currentPrice, currentCandle, direction);
 
                 if (shouldExit) {
-                    // Close position
                     BacktestTrade trade = closePosition(currentPosition, currentPrice, currentCandle.getTimestamp());
                     trades.add(trade);
 
                     currentBalance += trade.getPnl();
-                    currentBalance -= Math.abs(trade.getPositionSize() * currentPrice * feeRate); // Exit fee
+                    currentBalance -= Math.abs(trade.getPositionSize() * currentPrice * feeRate);
 
+                    logDirectionalTrade("CLOSE", currentPosition, analysis, currentPrice, direction);
                     currentPosition = null;
                 }
             }
@@ -205,9 +247,116 @@ public class BacktestService {
             currentBalance += trade.getPnl();
         }
 
-        // Calculate final metrics
-        return calculateBacktestMetrics(symbol, timeframe, trades, portfolioValues, returns,
-                maxDrawdown, startDate, endDate, currentBalance);
+        // Calculate final metrics with directional statistics
+        BacktestResult result = calculateDirectionalBacktestMetrics(symbol, timeframe, trades, portfolioValues,
+                returns, maxDrawdown, startDate, endDate,
+                currentBalance, totalSignals, holdSignals,
+                longSignals, shortSignals, positionsOpened);
+
+        return result;
+    }
+
+    private Position openDirectionalPosition(String symbol, CoinAnalysis analysis, double price,
+                                             double balance, LocalDateTime timestamp, Direction direction) {
+
+        double positionSize = (balance * positionSizePercent) / price;
+        Signal signal = convertDirectionToSignal(direction);
+
+        return Position.builder()
+                .symbol(symbol)
+                .side(signal)
+                .entryPrice(price)
+                .positionSize(positionSize)
+                .entryTime(timestamp)
+                .tradingRule(analysis.getTradingRule())
+                .score(analysis.getScore())
+                .direction(direction)
+                .build();
+    }
+
+    private boolean shouldExitDirectionalPosition(Position position, CoinAnalysis analysis,
+                                                  double currentPrice, HistoricalCandle candle,
+                                                  Direction currentDirection) {
+
+        Direction positionDirection = getPositionDirection(position);
+
+        // 1. Direction-based exit logic with confidence check
+        double mlConfidence = analysis.getMlConfidence(); // wrapper Double, lehet null
+        if (mlConfidence > minDirectionalConfidence) {
+            // Exit if ML suggests opposite direction
+            if ((positionDirection == Direction.LONG && currentDirection == Direction.SHORT) ||
+                    (positionDirection == Direction.SHORT && currentDirection == Direction.LONG)) {
+                return true;
+            }
+
+            // Exit if ML suggests HOLD with very high confidence (market uncertainty)
+            if (currentDirection == Direction.HOLD && mlConfidence > holdExitConfidence) {
+                return true;
+            }
+        }
+        // 2. Risk management - Stop loss / Take profit
+        double pnlPercent = calculatePnlPercent(position, currentPrice);
+
+        if (pnlPercent <= -stopLossPercent) {
+            return true;
+        }
+
+        if (pnlPercent >= takeProfitPercent) {
+            return true;
+        }
+
+        // 3. Time-based exit
+        long hoursInPosition = java.time.Duration.between(position.getEntryTime(), candle.getTimestamp()).toHours();
+        if (hoursInPosition >= maxHoldingHours) {
+            return true;
+        }
+
+        // 4. Volatility-based exit
+        if (analysis.getTechnicalIndicators() != null &&
+                analysis.getTechnicalIndicators().getVolatilityPercent() > 12.0) {
+            return true; // Exit in extreme volatility
+        }
+
+        return false;
+    }
+
+    private Direction getPositionDirection(Position position) {
+        if (position.getDirection() != null) {
+            return position.getDirection();
+        }
+
+        // Fallback conversion from Signal
+        return switch (position.getSide()) {
+            case LONG -> Direction.LONG;
+            case SHORT -> Direction.SHORT;
+            default -> Direction.HOLD;
+        };
+    }
+
+    private Signal convertDirectionToSignal(Direction direction) {
+        return switch (direction) {
+            case LONG -> Signal.LONG;
+            case SHORT -> Signal.SHORT;
+            case HOLD -> Signal.NO_TRADE;
+        };
+    }
+
+    private void logDirectionalTrade(String action, Position position, CoinAnalysis analysis,
+                                     double currentPrice, Direction direction) {
+
+        Double mlConfidence = analysis.getMlConfidence(); // wrapper Double
+        String message = String.format(
+                "%s %s position for %s: Price=%.4f, Direction=%s, Confidence=%.2f, Score=%.1f",
+                action,
+                getPositionDirection(position),
+                position.getSymbol(),
+                currentPrice,
+                direction,
+                mlConfidence,
+                analysis.getScore()
+        );
+
+        log.info("🔄 " + message);
     }
 
     private int findClosestIndex(List<HistoricalCandle> candles, LocalDateTime timestamp) {
@@ -216,12 +365,12 @@ public class BacktestService {
                 return j;
             }
         }
-        return candles.size() - 1; // fallback az utolsóra
+        return candles.size() - 1; // fallback to last
     }
 
     private List<List<Object>> prepareKlinesSlice(List<HistoricalCandle> data, int currentIndex, int lookback) {
         int startIdx = Math.max(0, currentIndex - lookback);
-        int endIdx = Math.min(currentIndex + 1, data.size()); // +1 hogy benne legyen az aktuális candle
+        int endIdx = Math.min(currentIndex + 1, data.size()); // +1 to include current candle
 
         return data.subList(startIdx, endIdx).stream()
                 .map(candle -> List.<Object>of(
@@ -233,52 +382,6 @@ public class BacktestService {
                         String.valueOf(candle.getVolume())
                 ))
                 .collect(java.util.stream.Collectors.toList());
-    }
-
-    private Position openPosition(String symbol, CoinAnalysis analysis, double price,
-                                  double balance, LocalDateTime timestamp) {
-
-        double positionSize = (balance * positionSizePercent) / price;
-
-        return Position.builder()
-                .symbol(symbol)
-                .side(analysis.getSignal())
-                .entryPrice(price)
-                .positionSize(positionSize)
-                .entryTime(timestamp)
-                .tradingRule(analysis.getTradingRule())
-                .score(analysis.getScore())
-                .build();
-    }
-
-    private boolean shouldExitPosition(Position position, CoinAnalysis analysis,
-                                       double currentPrice, HistoricalCandle candle) {
-
-        // Exit conditions:
-        // 1. Opposite signal
-        if ((position.getSide() == Signal.LONG && analysis.getSignal() == Signal.SHORT) ||
-                (position.getSide() == Signal.SHORT && analysis.getSignal() == Signal.LONG)) {
-            return true;
-        }
-
-        // 2. Risk management - Stop loss / Take profit
-        double pnlPercent = calculatePnlPercent(position, currentPrice);
-
-        if (pnlPercent <= -5.0) { // 5% stop loss
-            return true;
-        }
-
-        if (pnlPercent >= 8.0) { // 8% take profit
-            return true;
-        }
-
-        // 3. Time-based exit (optional)
-        long hoursInPosition = java.time.Duration.between(position.getEntryTime(), candle.getTimestamp()).toHours();
-        if (hoursInPosition >= 168) { // 7 days max
-            return true;
-        }
-
-        return false;
     }
 
     private BacktestTrade closePosition(Position position, double exitPrice, LocalDateTime exitTime) {
@@ -297,6 +400,7 @@ public class BacktestService {
                 .pnlPercent(pnlPercent)
                 .tradingRule(position.getTradingRule())
                 .score(position.getScore())
+                .direction(getPositionDirection(position))
                 .build();
     }
 
@@ -316,13 +420,16 @@ public class BacktestService {
         }
     }
 
-    private BacktestResult calculateBacktestMetrics(String symbol, String timeframe,
-                                                    List<BacktestTrade> trades,
-                                                    List<Double> portfolioValues,
-                                                    List<Double> returns,
-                                                    double maxDrawdown,
-                                                    LocalDateTime startDate, LocalDateTime endDate,
-                                                    double finalBalance) {
+    private BacktestResult calculateDirectionalBacktestMetrics(String symbol, String timeframe,
+                                                               List<BacktestTrade> trades,
+                                                               List<Double> portfolioValues,
+                                                               List<Double> returns,
+                                                               double maxDrawdown,
+                                                               LocalDateTime startDate, LocalDateTime endDate,
+                                                               double finalBalance,
+                                                               int totalSignals, int holdSignals,
+                                                               int longSignals, int shortSignals,
+                                                               int positionsOpened) {
 
         double totalReturnPercent = (finalBalance - initialBalance) / initialBalance * 100;
 
@@ -345,7 +452,13 @@ public class BacktestService {
         double grossLoss = Math.abs(trades.stream().filter(t -> t.getPnl() < 0).mapToDouble(BacktestTrade::getPnl).sum());
         double profitFactor = grossLoss > 0 ? grossProfit / grossLoss : Double.MAX_VALUE;
 
-        return BacktestResult.builder()
+        // Directional statistics
+        double holdRatio = totalSignals > 0 ? (double) holdSignals / totalSignals * 100 : 0.0;
+        double longRatio = totalSignals > 0 ? (double) longSignals / totalSignals * 100 : 0.0;
+        double shortRatio = totalSignals > 0 ? (double) shortSignals / totalSignals * 100 : 0.0;
+        double positionFillRate = totalSignals > holdSignals ? (double) positionsOpened / (totalSignals - holdSignals) * 100 : 0.0;
+
+        BacktestResult result = BacktestResult.builder()
                 .symbol(symbol)
                 .timeframe(timeframe)
                 .startDate(startDate)
@@ -364,7 +477,26 @@ public class BacktestService {
                 .sharpeRatio(sharpeRatio)
                 .trades(trades)
                 .success(true)
+                // Directional specific metrics
+                .totalSignals(totalSignals)
+                .holdSignals(holdSignals)
+                .longSignals(longSignals)
+                .shortSignals(shortSignals)
+                .holdRatio(holdRatio)
+                .longRatio(longRatio)
+                .shortRatio(shortRatio)
+                .positionsOpened(positionsOpened)
+                .positionFillRate(positionFillRate)
                 .build();
+
+        // Log directional statistics
+        log.info("Directional Backtest Stats for {}:", symbol);
+        log.info("  Total Signals: {}, Hold: {} ({:.1f}%), Long: {} ({:.1f}%), Short: {} ({:.1f}%)",
+                totalSignals, holdSignals, holdRatio, longSignals, longRatio, shortSignals, shortRatio);
+        log.info("  Positions Opened: {} / {} actionable signals ({:.1f}% fill rate)",
+                positionsOpened, totalSignals - holdSignals, positionFillRate);
+
+        return result;
     }
 
     private double calculateStandardDeviation(List<Double> values) {
@@ -377,6 +509,37 @@ public class BacktestService {
                 .orElse(0.0);
 
         return Math.sqrt(variance);
+    }
+
+    /**
+     * String-based method for compatibility with MLController
+     */
+    public BacktestResult runBacktest(String symbol, String timeframe, String startDate, String endDate) {
+        try {
+            LocalDateTime startDateTime = LocalDateTime.parse(startDate);
+            LocalDateTime endDateTime = LocalDateTime.parse(endDate);
+
+            BacktestResult result = runBacktest(symbol, timeframe, startDateTime, endDateTime);
+
+            // Store successful results for ML training
+            if (result.isSuccess()) {
+                backtestHistory.add(result);
+                // Keep only last 100 results to avoid memory issues
+                if (backtestHistory.size() > 100) {
+                    backtestHistory.remove(0);
+                }
+            }
+
+            return result;
+        } catch (Exception e) {
+            log.error("Failed to parse dates for backtest: {}", e.getMessage());
+            return BacktestResult.builder()
+                    .symbol(symbol)
+                    .timeframe(timeframe)
+                    .success(false)
+                    .errorMessage("Invalid date format: " + e.getMessage())
+                    .build();
+        }
     }
 
     /**
@@ -424,42 +587,6 @@ public class BacktestService {
         }
 
         return analysis;
-    }
-
-    // Add these method implementations to your BacktestService class:
-
-    private final List<BacktestResult> backtestHistory = new ArrayList<>();
-
-
-    /**
-     * String-based method for compatibility with MLController
-     */
-    public BacktestResult runBacktest(String symbol, String timeframe, String startDate, String endDate) {
-        try {
-            LocalDateTime startDateTime = LocalDateTime.parse(startDate);
-            LocalDateTime endDateTime = LocalDateTime.parse(endDate);
-
-            BacktestResult result = runBacktest(symbol, timeframe, startDateTime, endDateTime);
-
-            // Store successful results for ML training
-            if (result.isSuccess()) {
-                backtestHistory.add(result);
-                // Keep only last 100 results to avoid memory issues
-                if (backtestHistory.size() > 100) {
-                    backtestHistory.remove(0);
-                }
-            }
-
-            return result;
-        } catch (Exception e) {
-            log.error("Failed to parse dates for backtest: {}", e.getMessage());
-            return BacktestResult.builder()
-                    .symbol(symbol)
-                    .timeframe(timeframe)
-                    .success(false)
-                    .errorMessage("Invalid date format: " + e.getMessage())
-                    .build();
-        }
     }
 
     /**

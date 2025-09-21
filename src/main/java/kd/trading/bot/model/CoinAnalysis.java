@@ -1,7 +1,9 @@
 package kd.trading.bot.model;
 
+import kd.trading.bot.enums.Direction;
 import kd.trading.bot.enums.Signal;
 import kd.trading.bot.model.ml.MLPredictionResponse;
+import kd.trading.bot.service.ratingProcess.algorithm.SwingAlgoService;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -17,6 +19,8 @@ import java.util.Map;
 @NoArgsConstructor
 @AllArgsConstructor
 public class CoinAnalysis {
+    private Direction direction;                    // ÚJ
+    private Map<String, Double> probabilities;      // ÚJ
     private String symbol;
     private double score;              // Final combined score (0-10)
     private Signal signal;             // Final trading decision (from ML)

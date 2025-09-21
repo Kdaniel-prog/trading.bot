@@ -21,6 +21,17 @@ public class BacktestResult {
     private LocalDateTime startDate;
     private LocalDateTime endDate;
 
+    private int totalSignals;
+    private int holdSignals;
+    private int longSignals;
+    private int shortSignals;
+    private double holdRatio;
+    private double longRatio;
+    private double shortRatio;
+    private int positionsOpened;
+    private double positionFillRate;
+    private int actionSignals;
+
     // Balance metrics
     private double initialBalance;
     private double finalBalance;

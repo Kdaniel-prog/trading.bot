@@ -1,101 +1,201 @@
-# test_signal_generation.py - Új script a signal teszteléshez
-# !/usr/bin/env python3
+#!/usr/bin/env python3
 """
-Test signal generation for debugging
+ML Predictor - Java-Python Bridge
+Használja a meglévő Neural Net és XGBoost modelleket
+a SwingAlgoService technikai adatai alapján
 """
 
-import requests
+import sys
 import json
-from datetime import datetime, timedelta
+import numpy as np
+from pathlib import Path
+import pickle
+from tensorflow.keras.models import load_model
 
+class SwingTradingPredictor:
+    def __init__(self):
+        self.version = "v1.1"
+        self.confidence_threshold = 0.65
+        self.model_dir = Path("src/main/resources/data/models")
+        self.model_dir.mkdir(parents=True, exist_ok=True)
 
-def test_single_symbol_backtest(symbol="BTCUSDT", base_url="http://localhost:8080"):
-    """
-    Test single symbol to check signal generation
-    """
-    api_base = f"{base_url}/api/backtest"
+        # Betöltjük a modelleket
+        self.nn_model = None
+        self.xgb_model = None
+        self.scaler = None
 
-    # Use 2024 dates
-    end_date = datetime(2024, 9, 20)
-    start_date = datetime(2024, 6, 20)  # 3 months
+        nn_path = self.model_dir / "neural_net_classifier.keras"
+        xgb_path = self.model_dir / "xgb_classifier.pkl"
+        scaler_path = self.model_dir / "scaler.pkl"
 
-    payload = {
-        "symbol": symbol,
-        "timeframe": "4h",
-        "startDate": start_date.isoformat(),
-        "endDate": end_date.isoformat()
-    }
+        if nn_path.exists():
+            self.nn_model = load_model(nn_path)
+            print("Loaded Neural Net model")
+        if xgb_path.exists():
+            with open(xgb_path, "rb") as f:
+                self.xgb_model = pickle.load(f)
+            print("Loaded XGBoost model")
+        if scaler_path.exists():
+            with open(scaler_path, "rb") as f:
+                self.scaler = pickle.load(f)
+            print("Loaded scaler")
 
-    print(f"Testing backtest for {symbol}")
-    print(f"Date range: {start_date.date()} to {end_date.date()}")
-    print(f"Payload: {json.dumps(payload, indent=2)}")
+    def predict_trading_signal(self, java_data):
+        try:
+            symbol = java_data.get('symbol', 'UNKNOWN')
+            indicators = self.extract_technical_indicators(java_data)
+
+            # Konvertálás numpy array-be
+            features = np.array([list(indicators.values())], dtype=float)
+
+            # Skálázás
+            if self.scaler:
+                features_scaled = self.scaler.transform(features)
+            else:
+                features_scaled = features
+
+            # Neural Net predikció
+            nn_signal = 'NO_TRADE'
+            nn_conf = 0.5
+            if self.nn_model:
+                nn_pred = self.nn_model.predict(features_scaled, verbose=0)
+                nn_conf = float(nn_pred[0,0])
+                nn_signal = 'LONG' if nn_conf > 0.5 else 'SHORT'
+
+            # XGBoost predikció
+            xgb_signal = 'NO_TRADE'
+            xgb_conf = 0.5
+            if self.xgb_model:
+                xgb_pred = self.xgb_model.predict(features_scaled)
+                xgb_proba = self.xgb_model.predict_proba(features_scaled)[0,1]
+                xgb_conf = float(xgb_proba)
+                xgb_signal = 'LONG' if xgb_pred[0] == 1 else 'SHORT'
+
+            # Kombinált döntés (egyszerű átlagszabály)
+            combined_conf = (nn_conf + xgb_conf) / 2
+            if combined_conf >= self.confidence_threshold:
+                final_signal = 'LONG'
+            elif combined_conf <= 1 - self.confidence_threshold:
+                final_signal = 'SHORT'
+            else:
+                final_signal = 'NO_TRADE'
+
+            return {
+                'signal': final_signal,
+                'confidence': combined_conf,
+                'probability': combined_conf,
+                'nn_signal': nn_signal,
+                'nn_confidence': nn_conf,
+                'xgb_signal': xgb_signal,
+                'xgb_confidence': xgb_conf
+            }
+
+        except Exception as e:
+            print(f"Prediction error: {e}")
+            return {
+                'signal': 'NO_TRADE',
+                'confidence': 0.0,
+                'probability': 0.5,
+                'error': str(e)
+            }
+
+    def extract_technical_indicators(self, java_data):
+        """
+        Egyszerűsített: minden technikai indikátor float vagy bool formátumba
+        """
+        tech = java_data.get('technicalIndicators', {})
+        indicators = {}
+        # trend
+        indicators['primary_trend'] = self.convert_trend(tech.get('primaryTrend', 'NEUTRAL'))
+        indicators['short_term_trend'] = self.convert_trend(tech.get('shortTermTrend', 'NEUTRAL'))
+        indicators['trend_alignment'] = float(tech.get('trendAlignment', False))
+        indicators['trend_strength'] = float(tech.get('trendStrength', 0.0))
+        # EMA
+        current_price = float(java_data.get('currentPrice', 1.0))
+        indicators['price_vs_ema20_4h'] = current_price / max(float(tech.get('ema20_4h', current_price)), 0.1)
+        indicators['price_vs_ema50_4h'] = current_price / max(float(tech.get('ema50_4h', current_price)), 0.1)
+        indicators['price_vs_ema200'] = current_price / max(float(tech.get('ema200_daily', current_price)), 0.1)
+        # RSI
+        indicators['rsi'] = float(tech.get('rsi', 50.0))
+        indicators['rsi_normalized'] = (float(tech.get('rsi', 50.0)) - 50.0)/50.0
+        indicators['rsi_oversold'] = float(tech.get('rsiOversold', False))
+        indicators['rsi_overbought'] = float(tech.get('rsiOverbought', False))
+        indicators['rsi_rising'] = float(tech.get('rsiRising', False))
+        # MACD
+        indicators['macd_bullish'] = float(tech.get('macdBullish', False))
+        indicators['macd_bearish'] = float(tech.get('macdBearish', False))
+        # Volume
+        indicators['volume_ratio'] = float(tech.get('volumeRatio', 1.0))
+        indicators['strong_volume'] = float(tech.get('strongVolume', False))
+        indicators['volume_breakout'] = float(tech.get('volumeBreakout', False))
+        indicators['volume_trend_up'] = float(tech.get('volumeTrendUp', False))
+        # Risk
+        indicators['volatility_percent'] = float(tech.get('volatilityPercent', 0.0))
+        indicators['risk_reward_ratio'] = float(tech.get('riskRewardRatio', 0.0))
+        indicators['distance_from_support'] = float(tech.get('distanceFromSupport', 0.0))
+        indicators['distance_from_resistance'] = float(tech.get('distanceFromResistance', 0.0))
+        # Structure
+        indicators['bullish_structure'] = float(tech.get('bullishStructure', False))
+        indicators['bearish_structure'] = float(tech.get('bearishStructure', False))
+        indicators['higher_highs'] = float(tech.get('higherHighs', False))
+        indicators['lower_lows'] = float(tech.get('lowerLows', False))
+        indicators['consolidation'] = float(tech.get('consolidation', False))
+
+        return indicators
+
+    def convert_trend(self, trend_str):
+        if trend_str == 'BULLISH':
+            return 1.0
+        elif trend_str == 'BEARISH':
+            return -1.0
+        else:
+            return 0.0
+
+def main():
+    if len(sys.argv) != 3:
+        print("Usage: python ml_predictor.py <input_file> <output_file>")
+        sys.exit(1)
+
+    input_file = sys.argv[1]
+    output_file = sys.argv[2]
 
     try:
-        response = requests.post(
-            f"{api_base}/run",
-            json=payload,
-            timeout=60
-        )
-        response.raise_for_status()
+        with open(input_file, 'r', encoding='utf-8') as f:
+            request_data = json.load(f)
 
-        result = response.json()
+        symbol = request_data.get('symbol', 'UNKNOWN')
+        print(f"Processing prediction for: {symbol}")
 
-        print(f"\n=== BACKTEST RESULT ===")
-        print(f"Success: {result.get('success', False)}")
-        print(f"Symbol: {result.get('symbol')}")
-        print(f"Total Trades: {result.get('totalTrades', 0)}")
-        print(f"Total Return: {result.get('totalReturnPercent', 0):.2f}%")
-        print(f"Win Rate: {result.get('winRate', 0):.1f}%")
+        predictor = SwingTradingPredictor()
+        result = predictor.predict_trading_signal(request_data)
 
-        if result.get('success') and result.get('totalTrades', 0) > 0:
-            print(f"Winning Trades: {result.get('winningTrades', 0)}")
-            print(f"Losing Trades: {result.get('losingTrades', 0)}")
-            print(f"Profit Factor: {result.get('profitFactor', 0):.2f}")
-            print(f"Max Drawdown: {result.get('maxDrawdownPercent', 0):.2f}%")
+        response = {
+            'symbol': symbol,
+            'predictedSignal': result['signal'],
+            'confidence': result['confidence'],
+            'probability': result['probability'],
+            'modelVersion': f'SwingPredictor_{predictor.version}',
+            'nn_signal': result.get('nn_signal'),
+            'nn_confidence': result.get('nn_confidence'),
+            'xgb_signal': result.get('xgb_signal'),
+            'xgb_confidence': result.get('xgb_confidence')
+        }
 
-            # Show first few trades
-            trades = result.get('trades', [])
-            if trades:
-                print(f"\nFirst 3 trades:")
-                for i, trade in enumerate(trades[:3]):
-                    print(
-                        f"  Trade {i + 1}: {trade.get('side')} at {trade.get('entryPrice')} -> {trade.get('exitPrice')} = {trade.get('pnlPercent', 0):.2f}%")
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(response, f, indent=2, ensure_ascii=False)
 
-        else:
-            print(f"Error: {result.get('errorMessage', 'No trades generated')}")
-
-        return result
+        print(f"Prediction complete: {result['signal']} ({result['confidence']:.2f} confidence)")
 
     except Exception as e:
-        print(f"Test failed: {e}")
-        return None
-
-
-def test_multiple_symbols():
-    """
-    Test multiple symbols to find which ones generate trades
-    """
-    test_symbols = ["BTCUSDT", "ETHUSDT", "ADAUSDT", "DOTUSDT", "LINKUSDT"]
-
-    results = []
-
-    for symbol in test_symbols:
-        print(f"\n{'=' * 50}")
-        result = test_single_symbol_backtest(symbol)
-        if result:
-            results.append({
-                'symbol': symbol,
-                'success': result.get('success', False),
-                'trades': result.get('totalTrades', 0),
-                'return': result.get('totalReturnPercent', 0)
-            })
-
-    print(f"\n{'=' * 50}")
-    print("SUMMARY:")
-    for r in results:
-        print(f"{r['symbol']}: {r['trades']} trades, {r['return']:.2f}% return")
-
-
-if __name__ == "__main__":
-    print("Testing signal generation...")
-    test_multiple_symbols()
+        error_response = {
+            'symbol': request_data.get('symbol', 'ERROR') if 'request_data' in locals() else 'ERROR',
+            'predictedSignal': 'NO_TRADE',
+            'confidence': 0.0,
+            'probability': 0.5,
+            'error': str(e),
+            'modelVersion': 'SwingPredictor_v1.1'
+        }
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(error_response, f, indent=2, ensure_ascii=False)
+        print(f"Error: {e}")
+        sys
