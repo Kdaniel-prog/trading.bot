@@ -16,7 +16,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.time.temporal.ChronoUnit; // MISSING IMPORT JAVÍTVA
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -38,13 +38,6 @@ public class BacktestService {
             "4h", 480,     // 2 hónap
             "1d", 180,     // 6 hónap (180 nap elegendő daily timeframe-hez!)
             "1w", 52       // 1 év
-    );
-
-    // OHLC Resampling ratios - correct ratios for timeframe conversion
-    private static final Map<String, Map<String, Integer>> TIMEFRAME_RATIOS = Map.of(
-            "1h", Map.of("4h", 4, "1d", 24),
-            "4h", Map.of("1d", 6),
-            "1d", Map.of("1w", 7)
     );
 
     // Configuration from YAML
@@ -120,7 +113,7 @@ public class BacktestService {
                 return qualityCheck;
             }
 
-            // 4. Multi-timeframe adatok előkészítése - JAVÍTOTT VERZIÓ
+            // 4. Multi-timeframe adatok előkészítése
             Map<String, List<HistoricalCandle>> timeframeData = prepareTimeframeDataFixed(candleData, timeframe);
 
             // 5. Backtest futtatása
@@ -138,6 +131,59 @@ public class BacktestService {
         } catch (Exception e) {
             log.error("Backtest failed for {}: {}", symbol, e.getMessage(), e);
             return createErrorResult(symbol, timeframe, e.getMessage());
+        }
+    }
+
+    /**
+     * MAIN RELAXED BACKTEST METHOD - THIS WAS MISSING
+     */
+    public BacktestResult runRelaxedBacktest(String symbol, String timeframe,
+                                             LocalDateTime startDate, LocalDateTime endDate) {
+        log.info("Starting RELAXED directional backtest for {} {} from {} to {}",
+                symbol, timeframe, startDate, endDate);
+
+        // Store original parameters
+        double originalMinScore = this.minDirectionalScore;
+        double originalMinConfidence = this.minDirectionalConfidence;
+        double originalHoldExitConfidence = this.holdExitConfidence;
+
+        try {
+            // Apply relaxed parameters for training data generation
+            this.minDirectionalScore = 1.0;       // Much lower than default 5.0
+            this.minDirectionalConfidence = 0.3;  // Much lower than default 0.65
+            this.holdExitConfidence = 0.5;        // Lower than default 0.8
+
+            log.info("Applied relaxed parameters: minScore={}, minConfidence={}, holdExit={}",
+                    this.minDirectionalScore, this.minDirectionalConfidence, this.holdExitConfidence);
+
+            // Run normal backtest with relaxed parameters
+            BacktestResult result = runBacktest(symbol, timeframe, startDate, endDate);
+
+            // Mark the result as using relaxed parameters
+            if (result.getMetrics() == null) {
+                result.setMetrics(new HashMap<>());
+            }
+            result.getMetrics().put("relaxed_parameters", true);
+            result.getMetrics().put("relaxed_min_score", 1.0);
+            result.getMetrics().put("relaxed_min_confidence", 0.3);
+
+            if (result.isSuccess()) {
+                log.info("Relaxed backtest completed for {}: {}% return, {} trades (vs 0 with strict params)",
+                        symbol, result.getTotalReturnPercent(), result.getTotalTrades());
+            } else {
+                log.warn("Relaxed backtest failed for {}: {}", symbol, result.getErrorMessage());
+            }
+
+            return result;
+
+        } finally {
+            // Always restore original parameters
+            this.minDirectionalScore = originalMinScore;
+            this.minDirectionalConfidence = originalMinConfidence;
+            this.holdExitConfidence = originalHoldExitConfidence;
+
+            log.debug("Restored original parameters: minScore={}, minConfidence={}, holdExit={}",
+                    this.minDirectionalScore, this.minDirectionalConfidence, this.holdExitConfidence);
         }
     }
 
@@ -348,8 +394,6 @@ public class BacktestService {
         };
     }
 
-    // REST OF THE METHODS STAY THE SAME WITH THESE CRITICAL FIXES:
-
     private BacktestResult simulateDirectionalTrading(String symbol, String timeframe,
                                                       Map<String, List<HistoricalCandle>> timeframeData,
                                                       LocalDateTime startDate, LocalDateTime endDate) {
@@ -395,6 +439,16 @@ public class BacktestService {
 
             Direction direction = analysis.getDirection();
             totalSignals++;
+
+            // ADD DEBUG LOGGING HERE for first 10 signals
+            if (totalSignals <= 10) {
+                log.info("DEBUG Signal #{}: analysis={}, direction={}, score={}, confidence={}",
+                        totalSignals,
+                        "OK",
+                        analysis.getDirection(),
+                        analysis.getScore(),
+                        analysis.getMlConfidence());
+            }
 
             switch (direction) {
                 case HOLD -> holdSignals++;
@@ -468,6 +522,32 @@ public class BacktestService {
                 longSignals, shortSignals, positionsOpened);
     }
 
+    // MISSING METHOD - findClosestIndex
+    private int findClosestIndex(List<HistoricalCandle> candles, LocalDateTime timestamp) {
+        for (int j = 0; j < candles.size(); j++) {
+            if (!candles.get(j).getTimestamp().isBefore(timestamp)) {
+                return j;
+            }
+        }
+        return candles.size() - 1;
+    }
+
+    private List<List<Object>> prepareKlinesSlice(List<HistoricalCandle> data, int currentIndex, int lookback) {
+        int startIdx = Math.max(0, currentIndex - lookback);
+        int endIdx = Math.min(currentIndex + 1, data.size());
+
+        return data.subList(startIdx, endIdx).stream()
+                .map(candle -> List.<Object>of(
+                        candle.getTimestamp().toEpochSecond(ZoneOffset.UTC) * 1000,
+                        String.valueOf(candle.getOpen()),
+                        String.valueOf(candle.getHigh()),
+                        String.valueOf(candle.getLow()),
+                        String.valueOf(candle.getClose()),
+                        String.valueOf(candle.getVolume())
+                ))
+                .collect(Collectors.toList());
+    }
+
     private boolean shouldExitDirectionalPosition(Position position, CoinAnalysis analysis,
                                                   double currentPrice, HistoricalCandle candle,
                                                   Direction currentDirection) {
@@ -531,8 +611,7 @@ public class BacktestService {
         log.info("🔄 " + message);
     }
 
-    // ALL OTHER METHODS STAY THE SAME...
-    // (Keeping the rest of your original methods unchanged for brevity)
+    // ALL REMAINING HELPER METHODS...
 
     private BacktestResult tryWithExtendedDateRange(String symbol, String timeframe,
                                                     LocalDateTime originalStart, LocalDateTime originalEnd,
@@ -649,8 +728,6 @@ public class BacktestService {
                 .build();
     }
 
-    // REMAINING METHODS FROM ORIGINAL CODE:
-
     private Position openDirectionalPosition(String symbol, CoinAnalysis analysis, double price,
                                              double balance, LocalDateTime timestamp, Direction direction) {
 
@@ -687,31 +764,6 @@ public class BacktestService {
             case SHORT -> Signal.SHORT;
             case HOLD -> Signal.NO_TRADE;
         };
-    }
-
-    private int findClosestIndex(List<HistoricalCandle> candles, LocalDateTime timestamp) {
-        for (int j = 0; j < candles.size(); j++) {
-            if (!candles.get(j).getTimestamp().isBefore(timestamp)) {
-                return j;
-            }
-        }
-        return candles.size() - 1;
-    }
-
-    private List<List<Object>> prepareKlinesSlice(List<HistoricalCandle> data, int currentIndex, int lookback) {
-        int startIdx = Math.max(0, currentIndex - lookback);
-        int endIdx = Math.min(currentIndex + 1, data.size());
-
-        return data.subList(startIdx, endIdx).stream()
-                .map(candle -> List.<Object>of(
-                        candle.getTimestamp().toEpochSecond(ZoneOffset.UTC) * 1000,
-                        String.valueOf(candle.getOpen()),
-                        String.valueOf(candle.getHigh()),
-                        String.valueOf(candle.getLow()),
-                        String.valueOf(candle.getClose()),
-                        String.valueOf(candle.getVolume())
-                ))
-                .collect(Collectors.toList());
     }
 
     private BacktestTrade closePosition(Position position, double exitPrice, LocalDateTime exitTime) {
@@ -815,9 +867,11 @@ public class BacktestService {
 
         log.info("Directional Backtest Stats for {}:", symbol);
         log.info("  Total Signals: {}, Hold: {} ({}%), Long: {} ({}%), Short: {} ({}%)",
-                totalSignals, holdSignals, holdRatio, longSignals, longRatio, shortSignals, shortRatio);
+                totalSignals, holdSignals, String.format("%.1f", holdRatio),
+                longSignals, String.format("%.1f", longRatio),
+                shortSignals, String.format("%.1f", shortRatio));
         log.info("  Positions Opened: {} / {} actionable signals ({}% fill rate)",
-                positionsOpened, totalSignals - holdSignals, positionFillRate);
+                positionsOpened, totalSignals - holdSignals, String.format("%.1f", positionFillRate));
 
         return result;
     }
@@ -919,4 +973,158 @@ public class BacktestService {
     public int getBacktestHistorySize() {
         return backtestHistory.size();
     }
+
+    /**
+     * Alternative relaxed backtest with custom parameters
+     */
+    public BacktestResult runRelaxedBacktest(String symbol, String timeframe,
+                                             LocalDateTime startDate, LocalDateTime endDate,
+                                             double customMinScore, double customMinConfidence) {
+        log.info("Starting CUSTOM RELAXED backtest for {} with score={}, confidence={}",
+                symbol, customMinScore, customMinConfidence);
+
+        // Store original parameters
+        double originalMinScore = this.minDirectionalScore;
+        double originalMinConfidence = this.minDirectionalConfidence;
+
+        try {
+            // Apply custom relaxed parameters
+            this.minDirectionalScore = customMinScore;
+            this.minDirectionalConfidence = customMinConfidence;
+
+            // Run backtest with custom parameters
+            BacktestResult result = runBacktest(symbol, timeframe, startDate, endDate);
+
+            // Mark as custom relaxed
+            if (result.getMetrics() == null) {
+                result.setMetrics(new HashMap<>());
+            }
+            result.getMetrics().put("custom_relaxed_parameters", true);
+            result.getMetrics().put("custom_min_score", customMinScore);
+            result.getMetrics().put("custom_min_confidence", customMinConfidence);
+
+            return result;
+
+        } finally {
+            // Restore original parameters
+            this.minDirectionalScore = originalMinScore;
+            this.minDirectionalConfidence = originalMinConfidence;
+        }
+    }
+
+    /**
+     * Method to test different parameter combinations and find optimal thresholds
+     */
+    public Map<String, BacktestResult> testParameterCombinations(String symbol, String timeframe,
+                                                                 LocalDateTime startDate, LocalDateTime endDate) {
+        log.info("Testing parameter combinations for {} {}", symbol, timeframe);
+
+        Map<String, BacktestResult> results = new HashMap<>();
+
+        // Test different combinations
+        double[][] paramCombinations = {
+                {0.5, 0.2},   // Very relaxed
+                {1.0, 0.3},   // Relaxed (default for training)
+                {2.0, 0.4},   // Moderate
+                {3.0, 0.5},   // Semi-strict
+                {5.0, 0.65}   // Original strict
+        };
+
+        for (double[] params : paramCombinations) {
+            double testScore = params[0];
+            double testConfidence = params[1];
+
+            String key = String.format("score_%.1f_conf_%.2f", testScore, testConfidence);
+
+            try {
+                BacktestResult result = runRelaxedBacktest(symbol, timeframe, startDate, endDate,
+                        testScore, testConfidence);
+                results.put(key, result);
+
+                log.info("Test {}: {} trades, {}% return",
+                        key, result.getTotalTrades(), String.format("%.2f", result.getTotalReturnPercent()));
+
+            } catch (Exception e) {
+                log.warn("Parameter test failed for {}: {}", key, e.getMessage());
+            }
+        }
+
+        return results;
+    }
+
+    /**
+     * FIXED: Analyze signal distribution method with proper closing brace
+     */
+    public void analyzeSignalDistribution(String symbol, String timeframe,
+                                          LocalDateTime startDate, LocalDateTime endDate,
+                                          int sampleSize) {
+        try {
+            List<HistoricalCandle> candleData = featherDataLoader.loadHistoricalData(
+                    symbol, timeframe, startDate, endDate);
+
+            Map<String, List<HistoricalCandle>> timeframeData = prepareTimeframeDataFixed(candleData, timeframe);
+            List<HistoricalCandle> mainData = timeframeData.get(timeframe);
+
+            int startIndex = Math.max(200, 0);
+            int step = Math.max(1, (mainData.size() - startIndex) / sampleSize);
+
+            List<Double> scores = new ArrayList<>();
+            List<Double> confidences = new ArrayList<>();
+
+            log.info("Analyzing signal distribution for {} (sample size: {})", symbol, sampleSize);
+
+            for (int i = startIndex; i < mainData.size() - 1; i += step) {
+                HistoricalCandle currentCandle = mainData.get(i);
+
+                int idx4h = findClosestIndex(timeframeData.getOrDefault("4h", mainData), currentCandle.getTimestamp());
+                int idx1d = findClosestIndex(timeframeData.getOrDefault("1d", mainData), currentCandle.getTimestamp());
+                int idx1h = findClosestIndex(timeframeData.getOrDefault("1h", mainData), currentCandle.getTimestamp());
+
+                List<List<Object>> fourHourKlines = prepareKlinesSlice(timeframeData.getOrDefault("4h", mainData), idx4h, 300);
+                List<List<Object>> dailyKlines = prepareKlinesSlice(timeframeData.getOrDefault("1d", mainData), idx1d, 200);
+                List<List<Object>> hourlyKlines = prepareKlinesSlice(timeframeData.getOrDefault("1h", mainData), idx1h, 100);
+
+                if (fourHourKlines.size() < 100 || dailyKlines.size() < 50) continue;
+
+                try {
+                    CoinAnalysis analysis = swingAlgoService.analyzeHistoricalCoin(
+                            symbol, currentCandle.getClose(), fourHourKlines, dailyKlines, hourlyKlines);
+
+                    if (analysis != null && analysis.getDirection() != Direction.HOLD) {
+                        scores.add(analysis.getScore());
+                        confidences.add(analysis.getMlConfidence());
+                    }
+                } catch (Exception e) {
+                    // Skip failed analyses
+                }
+            }
+
+            if (!scores.isEmpty()) {
+                scores.sort(Double::compareTo);
+                confidences.sort(Double::compareTo);
+
+                double scoreP50 = scores.get(scores.size() / 2);
+                double scoreP75 = scores.get(scores.size() * 3 / 4);
+                double scoreP90 = scores.get(scores.size() * 9 / 10);
+
+                double confP50 = confidences.get(confidences.size() / 2);
+                double confP75 = confidences.get(confidences.size() * 3 / 4);
+                double confP90 = confidences.get(confidences.size() * 9 / 10);
+
+                log.info("=== SIGNAL DISTRIBUTION ANALYSIS ===");
+                log.info("Sample size: {}", scores.size());
+                log.info("Score percentiles - P50: {}, P75: {}, P90: {}", scoreP50, scoreP75, scoreP90);
+                log.info("Confidence percentiles - P50: {}, P75: {}, P90: {}", confP50, confP75, confP90);
+                log.info("Current thresholds - Score: {}, Confidence: {}", minDirectionalScore, minDirectionalConfidence);
+                log.info("Suggested relaxed thresholds - Score: {}, Confidence: {}", scoreP50, confP50);
+                log.info("====================================");
+            } else {
+                log.warn("No valid signals found for analysis");
+            }
+
+        } catch (Exception e) {
+            log.error("Signal distribution analysis failed: {}", e.getMessage());
+        }
+    }
+
 }
