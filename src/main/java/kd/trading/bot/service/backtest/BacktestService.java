@@ -133,9 +133,13 @@ public class BacktestService {
             double currentPrice = currentCandle.getClose();
 
             // Prepare historical data slices for analysis (no look-ahead)
-            List<List<Object>> fourHourKlines = prepareKlinesSlice(timeframeData.get("4h"), i, 300);
-            List<List<Object>> dailyKlines = prepareKlinesSlice(timeframeData.get("1d"), i, 200);
-            List<List<Object>> hourlyKlines = prepareKlinesSlice(timeframeData.get("1h"), i, 100);
+            int idx4h = findClosestIndex(timeframeData.get("4h"), currentCandle.getTimestamp());
+            int idx1d = findClosestIndex(timeframeData.get("1d"), currentCandle.getTimestamp());
+            int idx1h = findClosestIndex(timeframeData.get("1h"), currentCandle.getTimestamp());
+
+            List<List<Object>> fourHourKlines = prepareKlinesSlice(timeframeData.get("4h"), idx4h, 300);
+            List<List<Object>> dailyKlines    = prepareKlinesSlice(timeframeData.get("1d"), idx1d, 200);
+            List<List<Object>> hourlyKlines   = prepareKlinesSlice(timeframeData.get("1h"), idx1h, 100);
 
             // Skip if insufficient data
             if (fourHourKlines.size() < 100 || dailyKlines.size() < 50) {
@@ -206,9 +210,18 @@ public class BacktestService {
                 maxDrawdown, startDate, endDate, currentBalance);
     }
 
+    private int findClosestIndex(List<HistoricalCandle> candles, LocalDateTime timestamp) {
+        for (int j = 0; j < candles.size(); j++) {
+            if (!candles.get(j).getTimestamp().isBefore(timestamp)) {
+                return j;
+            }
+        }
+        return candles.size() - 1; // fallback az utolsóra
+    }
+
     private List<List<Object>> prepareKlinesSlice(List<HistoricalCandle> data, int currentIndex, int lookback) {
         int startIdx = Math.max(0, currentIndex - lookback);
-        int endIdx = Math.min(currentIndex + 1, data.size()); // +1 to include current candle
+        int endIdx = Math.min(currentIndex + 1, data.size()); // +1 hogy benne legyen az aktuális candle
 
         return data.subList(startIdx, endIdx).stream()
                 .map(candle -> List.<Object>of(

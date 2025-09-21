@@ -53,7 +53,7 @@ public class MLController {
 
                         if (backtestResult != null && backtestResult.isSuccess()) {
                             successfulBacktests++;
-                            log.info("Backtest completed for {}: {} trades, {:.2f}% profit",
+                            log.info("Backtest completed for {}: {} trades, {}% profit",
                                     symbol, backtestResult.getTotalTrades(),
                                     backtestResult.getTotalReturnPercent());
                         } else {

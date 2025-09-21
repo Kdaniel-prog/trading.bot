@@ -1,183 +1,280 @@
 package kd.trading.bot.model;
 
-import lombok.AllArgsConstructor;
-import lombok.Builder;
 import lombok.Data;
+import lombok.Builder;
 import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
-/**
- * Comprehensive technical indicators container
- * Contains all calculated indicators without trading logic
- */
 @Data
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
 public class TechnicalIndicators {
 
     // === TREND INDICATORS ===
+    @JsonProperty("ema20_4h")
     private double ema20_4h;
+
+    @JsonProperty("ema50_4h")
     private double ema50_4h;
+
+    @JsonProperty("ema200_daily")
     private double ema200_daily;
+
+    @JsonProperty("ema10_1h")
     private double ema10_1h;
+
+    @JsonProperty("ema20_1h")
     private double ema20_1h;
 
-    private String primaryTrend;        // BULLISH, BEARISH, NEUTRAL
-    private String shortTermTrend;      // BULLISH, BEARISH, NEUTRAL
-    private boolean trendAlignment;     // primary == shortTerm && != NEUTRAL
-    private double trendStrength;       // percentage from EMA200
+    @JsonProperty("primaryTrend")
+    private String primaryTrend = "NEUTRAL"; // BULLISH, BEARISH, NEUTRAL
+
+    @JsonProperty("shortTermTrend")
+    private String shortTermTrend = "NEUTRAL";
+
+    @JsonProperty("trendAlignment")
+    private boolean trendAlignment;
+
+    @JsonProperty("trendStrength")
+    private double trendStrength;
 
     // === MOMENTUM INDICATORS ===
+    @JsonProperty("rsi")
     private double rsi;
-    private double macdLine;
-    private double macdSignal;
-    private double macdHistogram;
-    private boolean macdBullish;        // line > signal && histogram > 0
-    private boolean macdBearish;        // line < signal && histogram < 0
 
-    private boolean rsiBullishZone;     // 30 < RSI < 75
-    private boolean rsiBearishZone;     // 25 < RSI < 70
-    private boolean rsiOversold;        // RSI < 30
-    private boolean rsiOverbought;      // RSI > 70
-    private boolean rsiRising;          // RSI trend direction
+    @JsonProperty("macdLine")
+    private double macdLine;
+
+    @JsonProperty("macdSignal")
+    private double macdSignal;
+
+    @JsonProperty("macdHistogram")
+    private double macdHistogram;
+
+    @JsonProperty("macdBullish")
+    private boolean macdBullish;
+
+    @JsonProperty("macdBearish")
+    private boolean macdBearish;
+
+    @JsonProperty("rsiBullishZone")
+    private boolean rsiBullishZone;
+
+    @JsonProperty("rsiBearishZone")
+    private boolean rsiBearishZone;
+
+    @JsonProperty("rsiOversold")
+    private boolean rsiOversold;
+
+    @JsonProperty("rsiOverbought")
+    private boolean rsiOverbought;
+
+    @JsonProperty("rsiRising")
+    private boolean rsiRising;
 
     // === VOLUME INDICATORS ===
+    @JsonProperty("currentVolume")
     private double currentVolume;
+
+    @JsonProperty("averageVolume20")
     private double averageVolume20;
+
+    @JsonProperty("averageVolume50")
     private double averageVolume50;
-    private double volumeRatio;         // current / average20
-    private boolean strongVolume;       // volumeRatio > 1.3
-    private boolean volumeBreakout;     // volume in top 25% percentile
-    private boolean volumeTrendUp;      // volume trending upward
+
+    @JsonProperty("volumeRatio")
+    private double volumeRatio;
+
+    @JsonProperty("strongVolume")
+    private boolean strongVolume;
+
+    @JsonProperty("volumeBreakout")
+    private boolean volumeBreakout;
+
+    @JsonProperty("volumeTrendUp")
+    private boolean volumeTrendUp;
 
     // === VOLATILITY & RISK INDICATORS ===
+    @JsonProperty("atr")
     private double atr;
-    private double volatilityPercent;   // ATR / price * 100
-    private double shortTermVolatility; // ATR 15m / price * 100
 
+    @JsonProperty("volatilityPercent")
+    private double volatilityPercent;
+
+    @JsonProperty("shortTermVolatility")
+    private double shortTermVolatility;
+
+    @JsonProperty("nearestSupport")
     private double nearestSupport;
+
+    @JsonProperty("nearestResistance")
     private double nearestResistance;
-    private double distanceFromSupport; // % distance
-    private double distanceFromResistance; // % distance
-    private double riskRewardRatio;     // resistance_distance / support_distance
 
-    // === MARKET STRUCTURE ===
+    @JsonProperty("distanceFromSupport")
+    private double distanceFromSupport;
+
+    @JsonProperty("distanceFromResistance")
+    private double distanceFromResistance;
+
+    @JsonProperty("riskRewardRatio")
+    private double riskRewardRatio;
+
+    // === MARKET STRUCTURE INDICATORS ===
+    @JsonProperty("higherHighs")
     private boolean higherHighs;
+
+    @JsonProperty("lowerLows")
     private boolean lowerLows;
+
+    @JsonProperty("higherLows")
     private boolean higherLows;
+
+    @JsonProperty("lowerHighs")
     private boolean lowerHighs;
-    private boolean bullishStructure;   // HH && HL
-    private boolean bearishStructure;   // LL && LH
-    private boolean consolidation;      // sideways movement
+
+    @JsonProperty("bullishStructure")
+    private boolean bullishStructure;
+
+    @JsonProperty("bearishStructure")
+    private boolean bearishStructure;
+
+    @JsonProperty("consolidation")
+    private boolean consolidation;
+
+    // === CONVENIENCE METHODS ===
 
     /**
-     * Get all indicators as a formatted string for logging
+     * Overall bullish score (0-100)
      */
-    public String getSummary() {
-        return String.format(
-                "RSI: %.1f | MACD: %s | Trend: %s/%s | Volume: %.1fx | Volatility: %.1f%% | RR: %.2f",
-                rsi,
-                macdBullish ? "BULL" : (macdBearish ? "BEAR" : "NEUTRAL"),
-                primaryTrend, shortTermTrend,
-                volumeRatio,
-                volatilityPercent,
-                riskRewardRatio
-        );
+    public double getBullishScore() {
+        double score = 0.0;
+
+        // Trend components (40 points max)
+        if ("BULLISH".equals(primaryTrend)) score += 20;
+        if ("BULLISH".equals(shortTermTrend)) score += 10;
+        if (trendAlignment && "BULLISH".equals(primaryTrend)) score += 10;
+
+        // Momentum components (30 points max)
+        if (macdBullish) score += 10;
+        if (rsiBullishZone && !rsiOverbought) score += 10;
+        if (rsiOversold) score += 10; // Bounce opportunity
+
+        // Structure components (20 points max)
+        if (bullishStructure) score += 10;
+        if (higherHighs) score += 5;
+        if (higherLows) score += 5;
+
+        // Volume components (10 points max)
+        if (strongVolume) score += 5;
+        if (volumeBreakout) score += 5;
+
+        return Math.min(100.0, score);
     }
 
     /**
-     * Check if conditions are favorable for any trading (basic filters)
+     * Overall bearish score (0-100)
      */
-    public boolean isBasicallyTradeable() {
-        return volatilityPercent > 1.0 && volatilityPercent < 15.0  // reasonable volatility
-                && riskRewardRatio >= 1.2                               // minimum RR
-                && !Double.isNaN(rsi) && !Double.isNaN(macdLine);      // valid indicators
+    public double getBearishScore() {
+        double score = 0.0;
+
+        // Trend components (40 points max)
+        if ("BEARISH".equals(primaryTrend)) score += 20;
+        if ("BEARISH".equals(shortTermTrend)) score += 10;
+        if (trendAlignment && "BEARISH".equals(primaryTrend)) score += 10;
+
+        // Momentum components (30 points max)
+        if (macdBearish) score += 10;
+        if (rsiBearishZone && !rsiOversold) score += 10;
+        if (rsiOverbought) score += 10; // Correction opportunity
+
+        // Structure components (20 points max)
+        if (bearishStructure) score += 10;
+        if (lowerLows) score += 5;
+        if (lowerHighs) score += 5;
+
+        // Volume components (10 points max)
+        if (strongVolume) score += 5;
+        if (volumeBreakout) score += 5;
+
+        return Math.min(100.0, score);
     }
 
     /**
-     * Get trend strength category
+     * Risk score (higher = more risky)
      */
-    public String getTrendStrengthCategory() {
-        if (trendStrength > 10.0) return "VERY_STRONG";
-        if (trendStrength > 5.0) return "STRONG";
-        if (trendStrength > 2.0) return "MODERATE";
-        if (trendStrength > 0.5) return "WEAK";
+    public double getRiskScore() {
+        double risk = 0.0;
+
+        if (volatilityPercent > 10.0) risk += 30;
+        else if (volatilityPercent > 5.0) risk += 15;
+
+        if (riskRewardRatio < 1.5) risk += 20;
+        else if (riskRewardRatio > 3.0) risk -= 10;
+
+        if (distanceFromSupport < 2.0) risk += 15;
+        if (distanceFromResistance < 2.0) risk += 15;
+
+        if (consolidation) risk += 10;
+
+        return Math.max(0.0, Math.min(100.0, risk));
+    }
+
+    /**
+     * Market condition summary
+     */
+    public String getMarketCondition() {
+        double bullish = getBullishScore();
+        double bearish = getBearishScore();
+        double risk = getRiskScore();
+
+        if (risk > 70) return "HIGH_RISK";
+        if (consolidation) return "CONSOLIDATING";
+
+        if (bullish > bearish + 20) return "STRONG_BULLISH";
+        if (bearish > bullish + 20) return "STRONG_BEARISH";
+        if (bullish > bearish + 10) return "WEAK_BULLISH";
+        if (bearish > bullish + 10) return "WEAK_BEARISH";
+
         return "NEUTRAL";
     }
 
     /**
-     * Get RSI zone description
+     * Trading confidence (0-1)
      */
-    public String getRsiZoneDescription() {
-        if (rsiOverbought) return "OVERBOUGHT";
-        if (rsiOversold) return "OVERSOLD";
-        if (rsiBullishZone) return "BULLISH_ZONE";
-        if (rsiBearishZone) return "BEARISH_ZONE";
-        return "NEUTRAL";
-    }
+    public double getTradingConfidence() {
+        double bullish = getBullishScore();
+        double bearish = getBearishScore();
+        double risk = getRiskScore();
 
-    /**
-     * Get volume strength description
-     */
-    public String getVolumeStrengthDescription() {
-        if (volumeRatio > 2.0) return "VERY_HIGH";
-        if (volumeRatio > 1.5) return "HIGH";
-        if (volumeRatio > 1.0) return "ABOVE_AVERAGE";
-        if (volumeRatio > 0.7) return "AVERAGE";
-        return "LOW";
-    }
+        double signalStrength = Math.abs(bullish - bearish);
+        double riskPenalty = risk / 100.0;
 
-    /**
-     * Check if market structure is bullish
-     */
-    public boolean isBullishMarketStructure() {
-        return bullishStructure || (higherHighs && !bearishStructure);
-    }
+        // Base confidence from signal strength
+        double confidence = signalStrength / 100.0;
 
-    /**
-     * Check if market structure is bearish
-     */
-    public boolean isBearishMarketStructure() {
-        return bearishStructure || (lowerLows && !bullishStructure);
-    }
+        // Apply risk penalty
+        confidence *= (1.0 - riskPenalty * 0.5);
 
-    /**
-     * Calculate overall technical score (0-100)
-     * This is for reference only, ML will make actual decisions
-     */
-    public double getTechnicalScore() {
-        double score = 50.0; // neutral base
-
-        // Trend component (±20 points)
-        if ("BULLISH".equals(primaryTrend)) {
-            score += 10.0;
-            if ("BULLISH".equals(shortTermTrend)) score += 5.0;
-            if (trendAlignment) score += 5.0;
-        } else if ("BEARISH".equals(primaryTrend)) {
-            score -= 10.0;
-            if ("BEARISH".equals(shortTermTrend)) score -= 5.0;
-            if (trendAlignment) score -= 5.0;
+        // Volume confirmation bonus
+        if (strongVolume || volumeBreakout) {
+            confidence += 0.1;
         }
 
-        // Momentum component (±15 points)
-        if (macdBullish && rsiBullishZone) score += 10.0;
-        else if (macdBearish && rsiBearishZone) score -= 10.0;
+        // Trend alignment bonus
+        if (trendAlignment) {
+            confidence += 0.1;
+        }
 
-        if (rsiOversold) score += 5.0;
-        else if (rsiOverbought) score -= 5.0;
+        return Math.max(0.0, Math.min(1.0, confidence));
+    }
 
-        // Volume component (±10 points)
-        if (strongVolume && volumeBreakout) score += 10.0;
-        else if (volumeRatio < 0.5) score -= 5.0;
-
-        // Structure component (±10 points)
-        if (bullishStructure) score += 10.0;
-        else if (bearishStructure) score -= 10.0;
-
-        // Risk adjustment (±5 points)
-        if (riskRewardRatio >= 2.0) score += 5.0;
-        else if (riskRewardRatio < 1.2) score -= 10.0;
-
-        return Math.max(0.0, Math.min(100.0, score));
+    @Override
+    public String toString() {
+        return String.format("TechnicalIndicators{trend=%s/%s, rsi=%.1f, macd=%s, volume=%.2fx, risk=%.1f}",
+                primaryTrend, shortTermTrend, rsi,
+                macdBullish ? "BULL" : (macdBearish ? "BEAR" : "NEUT"),
+                volumeRatio, getRiskScore());
     }
 }

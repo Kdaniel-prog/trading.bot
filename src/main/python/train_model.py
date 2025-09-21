@@ -1,312 +1,427 @@
-# train_model.py
-import argparse
-import json
-import pandas as pd
-import numpy as np
-import pickle
-from pathlib import Path
-from datetime import datetime
-import logging
+#!/usr/bin/env python3
+"""
+ML Model Training Script
+Uses backtest results to train the trading prediction model
+"""
 
-# ML libraries
+import sys
+import json
+import numpy as np
+import pandas as pd
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingRegressor
-from sklearn.metrics import classification_report, mean_squared_error, accuracy_score
-import xgboost as xgb
+from sklearn.metrics import classification_report, confusion_matrix
+import warnings
+import os
+from pathlib import Path
+from datetime import datetime
+import joblib
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+warnings.filterwarnings('ignore')
+tf.get_logger().setLevel('ERROR')
 
-class TradingMLTrainer:
-    def __init__(self, model_name="swing_trader", model_path="/app/models"):
-        self.model_name = model_name
-        self.model_path = Path(model_path)
-        self.model_path.mkdir(parents=True, exist_ok=True)
+class TradingModelTrainer:
+    def __init__(self):
+        """
+        Trading Model Trainer - uses backtest results for supervised learning
+        """
+        # Paths - save to resources/data
+        self.base_dir = Path("src/main/resources/data")
+        self.model_dir = self.base_dir / "models"
+        self.training_dir = self.base_dir / "training"
 
-        self.feature_columns = [
-            'tradingRule', 'algoScore', 'rsi', 'macd', 'macd_signal', 'macd_histogram',
-            'bollinger_upper', 'bollinger_lower', 'bollinger_percent',
-            'sma_20', 'sma_50', 'ema_12', 'ema_26', 'ema_50', 'ema_200',
-            'price_change_1h', 'price_change_4h', 'price_change_1d',
-            'volatility_1h', 'volatility_4h', 'volatility_1d',
-            'volume_ratio', 'atr', 'adx', 'market_trend', 'market_volatility',
-            'hour_of_day', 'day_of_week'
-        ]
+        # Create directories
+        self.model_dir.mkdir(parents=True, exist_ok=True)
+        self.training_dir.mkdir(parents=True, exist_ok=True)
 
-    def load_training_data(self, data_path):
-        """Load and prepare training data from JSON files"""
-        logger.info(f"Loading training data from {data_path}")
+        # Model files
+        self.model_path = self.model_dir / "swing_trading_model.h5"
+        self.scaler_path = self.model_dir / "feature_scaler.pkl"
+        self.label_encoder_path = self.model_dir / "label_encoder.pkl"
+        self.metadata_path = self.model_dir / "model_metadata.json"
 
-        data_files = list(Path(data_path).glob("training_data_*.json"))
-        all_data = []
+        # Training parameters
+        self.feature_dim = 25
+        self.epochs = 50
+        self.batch_size = 32
+        self.validation_split = 0.2
 
-        for file in data_files:
-            with open(file, 'r') as f:
-                file_data = json.load(f)
-                all_data.extend(file_data)
+        print(f"TradingModelTrainer initialized")
+        print(f"Models will be saved to: {self.model_dir}")
 
-        if not all_data:
-            raise ValueError("No training data found")
+    def load_training_data(self, training_file_pattern="training_data_*.json"):
+        """
+        Load training data from backtest results
+        """
+        training_files = list(self.training_dir.glob(training_file_pattern))
 
-        df = pd.DataFrame(all_data)
-        logger.info(f"Loaded {len(df)} training samples")
+        if not training_files:
+            # Also check Python data directory
+            python_data_dir = Path("src/main/python/data/ml")
+            training_files = list(python_data_dir.glob(training_file_pattern))
 
-        return self.preprocess_data(df)
+        if not training_files:
+            raise FileNotFoundError(f"No training files found matching pattern: {training_file_pattern}")
 
-    def preprocess_data(self, df):
-        """Preprocess the training data"""
-        # Convert timestamps
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df['hour_of_day'] = df['timestamp'].dt.hour
-        df['day_of_week'] = df['timestamp'].dt.dayofweek
+        print(f"Found {len(training_files)} training files")
 
-        # Handle missing values
-        for col in self.feature_columns:
-            if col not in df.columns:
-                df[col] = 0.0
-            df[col] = df[col].fillna(0.0)
+        all_samples = []
 
-        # Encode categorical variables
-        le_signal = LabelEncoder()
-        df['side_encoded'] = le_signal.fit_transform(df['side'])
+        for file_path in training_files:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
 
-        # Create target variables
-        df['is_profitable'] = (df['pnlPercent'] > 0).astype(int)
-        df['profit_category'] = pd.cut(df['pnlPercent'],
-                                       bins=[-100, -5, -2, 2, 5, 100],
-                                       labels=['terrible', 'bad', 'neutral', 'good', 'excellent'])
+                samples = data.get('samples', [])
+                print(f"Loaded {len(samples)} samples from {file_path.name}")
+                all_samples.extend(samples)
 
-        # Filter outliers
-        df = df[(df['pnlPercent'] >= -20) & (df['pnlPercent'] <= 20)]
+            except Exception as e:
+                print(f"Error loading {file_path}: {e}")
 
-        logger.info(f"Preprocessed data shape: {df.shape}")
-        return df
+        print(f"Total training samples: {len(all_samples)}")
+        return all_samples
 
-    def create_neural_network(self, input_dim, task='classification'):
-        """Create a neural network for trading prediction"""
-        model = keras.Sequential([
-            layers.Dense(256, activation='relu', input_shape=(input_dim,)),
-            layers.BatchNormalization(),
-            layers.Dropout(0.3),
+    def prepare_features_and_labels(self, samples):
+        """
+        Convert backtest samples to ML features and labels
+        """
+        features = []
+        labels = []
+        sample_info = []
 
-            layers.Dense(128, activation='relu'),
-            layers.BatchNormalization(),
-            layers.Dropout(0.3),
+        for sample in samples:
+            try:
+                # Extract technical indicators
+                tech = sample.get('technicalIndicators', {})
 
-            layers.Dense(64, activation='relu'),
-            layers.BatchNormalization(),
-            layers.Dropout(0.2),
+                # Create feature vector (same as in ml_predictor.py)
+                feature_vector = self.extract_feature_vector(tech, sample)
 
-            layers.Dense(32, activation='relu'),
-            layers.Dropout(0.2),
+                # Get actual trade outcome as label
+                trade_outcome = sample.get('actualOutcome', 'NO_TRADE')
+
+                # Skip if no clear outcome
+                if trade_outcome == 'NO_TRADE':
+                    continue
+
+                features.append(feature_vector)
+                labels.append(trade_outcome)
+
+                # Keep sample info for analysis
+                sample_info.append({
+                    'symbol': sample.get('symbol', 'UNKNOWN'),
+                    'timestamp': sample.get('timestamp'),
+                    'actualReturn': sample.get('actualReturn', 0.0),
+                    'holdingTimeHours': sample.get('holdingTimeHours', 0)
+                })
+
+            except Exception as e:
+                print(f"Error processing sample: {e}")
+                continue
+
+        if len(features) == 0:
+            raise ValueError("No valid training samples found")
+
+        features = np.array(features, dtype=np.float32)
+        labels = np.array(labels)
+
+        print(f"Prepared {len(features)} samples with {features.shape[1]} features")
+        print(f"Label distribution: {dict(zip(*np.unique(labels, return_counts=True)))}")
+
+        return features, labels, sample_info
+
+    def extract_feature_vector(self, tech_indicators, sample):
+        """
+        Extract numerical feature vector from technical indicators
+        Same logic as ml_predictor.py for consistency
+        """
+        features = []
+
+        current_price = sample.get('currentPrice', 1.0)
+
+        # 1. Trend features (6 features)
+        features.extend([
+            1.0 if tech_indicators.get('primaryTrend') == 'BULLISH' else (-1.0 if tech_indicators.get('primaryTrend') == 'BEARISH' else 0.0),
+            1.0 if tech_indicators.get('shortTermTrend') == 'BULLISH' else (-1.0 if tech_indicators.get('shortTermTrend') == 'BEARISH' else 0.0),
+            1.0 if tech_indicators.get('trendAlignment', False) else 0.0,
+            float(tech_indicators.get('trendStrength', 0.0)),
+            float(tech_indicators.get('ema20_4h', current_price)) / current_price,
+            float(tech_indicators.get('ema50_4h', current_price)) / current_price
         ])
 
-        if task == 'classification':
-            # Binary classification (profitable vs not)
-            model.add(layers.Dense(1, activation='sigmoid'))
-            model.compile(optimizer='adam',
-                          loss='binary_crossentropy',
-                          metrics=['accuracy', 'precision', 'recall'])
-        else:
-            # Regression (predict return %)
-            model.add(layers.Dense(1, activation='linear'))
-            model.compile(optimizer='adam',
-                          loss='mse',
-                          metrics=['mae'])
+        # 2. Momentum features (6 features)
+        rsi = float(tech_indicators.get('rsi', 50.0))
+        features.extend([
+            rsi / 100.0,  # Normalized RSI
+            1.0 if tech_indicators.get('macdBullish', False) else 0.0,
+            1.0 if tech_indicators.get('macdBearish', False) else 0.0,
+            1.0 if tech_indicators.get('rsiBullishZone', False) else 0.0,
+            1.0 if tech_indicators.get('rsiBearishZone', False) else 0.0,
+            1.0 if tech_indicators.get('rsiRising', False) else 0.0
+        ])
+
+        # 3. Volume features (5 features)
+        features.extend([
+            float(tech_indicators.get('volumeRatio', 1.0)),
+            1.0 if tech_indicators.get('strongVolume', False) else 0.0,
+            float(tech_indicators.get('volumeRatio', 1.0)) / 5.0,  # Normalized volume ratio
+            1.0 if tech_indicators.get('volumeBreakout', False) else 0.0,
+            1.0 if tech_indicators.get('volumeTrendUp', False) else 0.0
+        ])
+
+        # 4. Risk features (4 features)
+        features.extend([
+            float(tech_indicators.get('riskRewardRatio', 0.0)) / 10.0,  # Normalized RR
+            float(tech_indicators.get('volatilityPercent', 0.0)) / 100.0,
+            float(tech_indicators.get('distanceFromSupport', 0.0)) / 100.0,
+            float(tech_indicators.get('distanceFromResistance', 0.0)) / 100.0
+        ])
+
+        # 5. Structure features (4 features)
+        features.extend([
+            1.0 if tech_indicators.get('higherHighs', False) else 0.0,
+            1.0 if tech_indicators.get('lowerLows', False) else 0.0,
+            1.0 if tech_indicators.get('bullishStructure', False) else 0.0,
+            1.0 if tech_indicators.get('bearishStructure', False) else 0.0
+        ])
+
+        # Pad or trim to exact feature dimension
+        while len(features) < self.feature_dim:
+            features.append(0.0)
+        features = features[:self.feature_dim]
+
+        return np.array(features, dtype=np.float32)
+
+    def create_model(self):
+        """
+        Create neural network model
+        """
+        # Input layer
+        inputs = keras.Input(shape=(self.feature_dim,), name='technical_features')
+
+        # Feature extraction layers
+        x = layers.Dense(64, activation='relu', name='dense_1')(inputs)
+        x = layers.BatchNormalization(name='bn_1')(x)
+        x = layers.Dropout(0.3, name='dropout_1')(x)
+
+        x = layers.Dense(32, activation='relu', name='dense_2')(x)
+        x = layers.BatchNormalization(name='bn_2')(x)
+        x = layers.Dropout(0.2, name='dropout_2')(x)
+
+        x = layers.Dense(16, activation='relu', name='dense_3')(x)
+        x = layers.Dropout(0.1, name='dropout_3')(x)
+
+        # Output layer - 3 classes (LONG, SHORT, NO_TRADE)
+        outputs = layers.Dense(3, activation='softmax', name='signal_output')(x)
+
+        # Create model
+        model = keras.Model(inputs=inputs, outputs=outputs, name='SwingTradingModel')
+
+        # Compile
+        model.compile(
+            optimizer=keras.optimizers.Adam(learning_rate=0.001),
+            loss='categorical_crossentropy',
+            metrics=['accuracy', 'precision', 'recall']
+        )
 
         return model
 
-    def train_ensemble_model(self, X_train, y_train, X_val, y_val):
-        """Train ensemble model combining multiple algorithms"""
-        models = {}
+    def train_model(self, features, labels):
+        """
+        Train the model
+        """
+        # Prepare label encoder
+        label_encoder = LabelEncoder()
+        encoded_labels = label_encoder.fit_transform(labels)
 
-        # 1. XGBoost Classifier for profitability
-        logger.info("Training XGBoost classifier...")
-        xgb_clf = xgb.XGBClassifier(
-            n_estimators=200,
-            max_depth=6,
-            learning_rate=0.1,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            random_state=42
-        )
-        xgb_clf.fit(X_train, (y_train > 0).astype(int))
-        models['xgb_classifier'] = xgb_clf
+        # Convert to categorical
+        categorical_labels = keras.utils.to_categorical(encoded_labels, num_classes=3)
 
-        # 2. XGBoost Regressor for return prediction
-        logger.info("Training XGBoost regressor...")
-        xgb_reg = xgb.XGBRegressor(
-            n_estimators=200,
-            max_depth=6,
-            learning_rate=0.1,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            random_state=42
-        )
-        xgb_reg.fit(X_train, y_train)
-        models['xgb_regressor'] = xgb_reg
+        # Scale features
+        scaler = StandardScaler()
+        scaled_features = scaler.fit_transform(features)
 
-        # 3. Random Forest for feature importance
-        logger.info("Training Random Forest...")
-        rf = RandomForestClassifier(
-            n_estimators=100,
-            max_depth=10,
-            random_state=42
-        )
-        rf.fit(X_train, (y_train > 0).astype(int))
-        models['random_forest'] = rf
-
-        # 4. Neural Network
-        logger.info("Training Neural Network...")
-        nn_clf = self.create_neural_network(X_train.shape[1], 'classification')
-        nn_reg = self.create_neural_network(X_train.shape[1], 'regression')
-
-        # Early stopping
-        early_stopping = keras.callbacks.EarlyStopping(
-            monitor='val_loss', patience=10, restore_best_weights=True
+        # Train/validation split
+        X_train, X_val, y_train, y_val = train_test_split(
+            scaled_features, categorical_labels,
+            test_size=self.validation_split,
+            random_state=42,
+            stratify=encoded_labels
         )
 
-        nn_clf.fit(X_train, (y_train > 0).astype(int),
-                   validation_data=(X_val, (y_val > 0).astype(int)),
-                   epochs=100, batch_size=64, verbose=0,
-                   callbacks=[early_stopping])
+        print(f"Training samples: {len(X_train)}, Validation samples: {len(X_val)}")
 
-        nn_reg.fit(X_train, y_train,
-                   validation_data=(X_val, y_val),
-                   epochs=100, batch_size=64, verbose=0,
-                   callbacks=[early_stopping])
+        # Create model
+        model = self.create_model()
+        print("Model architecture:")
+        model.summary()
 
-        models['neural_net_classifier'] = nn_clf
-        models['neural_net_regressor'] = nn_reg
+        # Training callbacks
+        callbacks = [
+            keras.callbacks.EarlyStopping(
+                monitor='val_loss', patience=10, restore_best_weights=True
+            ),
+            keras.callbacks.ReduceLROnPlateau(
+                monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6
+            )
+        ]
 
-        return models
+        # Train model
+        print("Starting training...")
+        history = model.fit(
+            X_train, y_train,
+            validation_data=(X_val, y_val),
+            epochs=self.epochs,
+            batch_size=self.batch_size,
+            callbacks=callbacks,
+            verbose=1
+        )
 
-    def evaluate_models(self, models, X_test, y_test):
-        """Evaluate all models and return metrics"""
-        results = {}
+        # Evaluate model
+        val_loss, val_accuracy, val_precision, val_recall = model.evaluate(X_val, y_val, verbose=0)
 
-        for name, model in models.items():
-            logger.info(f"Evaluating {name}...")
+        print(f"\nValidation Results:")
+        print(f"Loss: {val_loss:.4f}")
+        print(f"Accuracy: {val_accuracy:.4f}")
+        print(f"Precision: {val_precision:.4f}")
+        print(f"Recall: {val_recall:.4f}")
 
-            if 'classifier' in name:
-                y_pred = model.predict(X_test)
-                if hasattr(model, 'predict_proba'):
-                    y_pred_proba = model.predict_proba(X_test)[:, 1]
-                else:
-                    y_pred_proba = y_pred.flatten()
+        # Detailed classification report
+        y_pred = model.predict(X_val)
+        y_pred_classes = np.argmax(y_pred, axis=1)
+        y_val_classes = np.argmax(y_val, axis=1)
 
-                accuracy = accuracy_score((y_test > 0).astype(int),
-                                          (y_pred_proba > 0.5).astype(int))
+        class_names = label_encoder.classes_
+        print(f"\nClassification Report:")
+        print(classification_report(y_val_classes, y_pred_classes, target_names=class_names))
 
-                results[name] = {
-                    'accuracy': float(accuracy),
-                    'type': 'classification'
-                }
-            else:
-                y_pred = model.predict(X_test)
-                mse = mean_squared_error(y_test, y_pred)
-                mae = np.mean(np.abs(y_test - y_pred))
+        # Save model and components
+        model.save(self.model_path)
+        joblib.dump(scaler, self.scaler_path)
+        joblib.dump(label_encoder, self.label_encoder_path)
 
-                results[name] = {
-                    'mse': float(mse),
-                    'mae': float(mae),
-                    'rmse': float(np.sqrt(mse)),
-                    'type': 'regression'
-                }
-
-        return results
-
-    def save_models(self, models, scaler, feature_columns):
-        """Save all trained models and preprocessing objects"""
-        model_info = {
-            'model_name': self.model_name,
-            'created_at': datetime.now().isoformat(),
-            'feature_columns': feature_columns,
-            'model_types': list(models.keys())
+        # Save metadata
+        metadata = {
+            'model_version': '1.0',
+            'training_date': datetime.now().isoformat(),
+            'feature_dimension': self.feature_dim,
+            'num_classes': 3,
+            'class_names': class_names.tolist(),
+            'training_samples': len(X_train),
+            'validation_samples': len(X_val),
+            'val_accuracy': float(val_accuracy),
+            'val_precision': float(val_precision),
+            'val_recall': float(val_recall),
+            'epochs_trained': len(history.history['loss'])
         }
 
-        # Save individual models
-        for name, model in models.items():
-            if 'neural' in name:
-                model.save(self.model_path / f"{self.model_name}_{name}.h5")
-            else:
-                with open(self.model_path / f"{self.model_name}_{name}.pkl", 'wb') as f:
-                    pickle.dump(model, f)
+        with open(self.metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=2)
 
-        # Save scaler
-        with open(self.model_path / f"{self.model_name}_scaler.pkl", 'wb') as f:
-            pickle.dump(scaler, f)
+        print(f"\nModel saved to: {self.model_path}")
+        print(f"Scaler saved to: {self.scaler_path}")
+        print(f"Label encoder saved to: {self.label_encoder_path}")
+        print(f"Metadata saved to: {self.metadata_path}")
 
-        # Save model info
-        with open(self.model_path / f"{self.model_name}_info.json", 'w') as f:
-            json.dump(model_info, f, indent=2)
+        return model, history, scaler, label_encoder
 
-        logger.info(f"Models saved to {self.model_path}")
-
-    def train(self, data_path):
-        """Main training pipeline"""
+    def plot_training_history(self, history):
+        """
+        Plot training history
+        """
         try:
-            # Load and preprocess data
-            df = self.load_training_data(data_path)
+            fig, axes = plt.subplots(2, 2, figsize=(12, 8))
 
-            # Prepare features and targets
-            X = df[self.feature_columns].values
-            y = df['pnlPercent'].values
+            # Loss
+            axes[0,0].plot(history.history['loss'], label='Training Loss')
+            axes[0,0].plot(history.history['val_loss'], label='Validation Loss')
+            axes[0,0].set_title('Model Loss')
+            axes[0,0].set_xlabel('Epoch')
+            axes[0,0].set_ylabel('Loss')
+            axes[0,0].legend()
 
-            # Scale features
-            scaler = StandardScaler()
-            X_scaled = scaler.fit_transform(X)
+            # Accuracy
+            axes[0,1].plot(history.history['accuracy'], label='Training Accuracy')
+            axes[0,1].plot(history.history['val_accuracy'], label='Validation Accuracy')
+            axes[0,1].set_title('Model Accuracy')
+            axes[0,1].set_xlabel('Epoch')
+            axes[0,1].set_ylabel('Accuracy')
+            axes[0,1].legend()
 
-            # Split data
-            X_train, X_temp, y_train, y_temp = train_test_split(
-                X_scaled, y, test_size=0.4, random_state=42, stratify=(y > 0)
-            )
-            X_val, X_test, y_val, y_test = train_test_split(
-                X_temp, y_temp, test_size=0.5, random_state=42, stratify=(y_temp > 0)
-            )
+            # Precision
+            axes[1,0].plot(history.history['precision'], label='Training Precision')
+            axes[1,0].plot(history.history['val_precision'], label='Validation Precision')
+            axes[1,0].set_title('Model Precision')
+            axes[1,0].set_xlabel('Epoch')
+            axes[1,0].set_ylabel('Precision')
+            axes[1,0].legend()
 
-            logger.info(f"Training set: {X_train.shape}")
-            logger.info(f"Validation set: {X_val.shape}")
-            logger.info(f"Test set: {X_test.shape}")
+            # Recall
+            axes[1,1].plot(history.history['recall'], label='Training Recall')
+            axes[1,1].plot(history.history['val_recall'], label='Validation Recall')
+            axes[1,1].set_title('Model Recall')
+            axes[1,1].set_xlabel('Epoch')
+            axes[1,1].set_ylabel('Recall')
+            axes[1,1].legend()
 
-            # Train ensemble models
-            models = self.train_ensemble_model(X_train, y_train, X_val, y_val)
+            plt.tight_layout()
 
-            # Evaluate models
-            results = self.evaluate_models(models, X_test, y_test)
+            # Save plot
+            plot_path = self.training_dir / f"training_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+            plt.show()
 
-            # Save everything
-            self.save_models(models, scaler, self.feature_columns)
-
-            # Print results
-            logger.info("Training completed successfully!")
-            logger.info("Model Performance:")
-            for name, metrics in results.items():
-                logger.info(f"  {name}: {metrics}")
-
-            return results
+            print(f"Training history plot saved to: {plot_path}")
 
         except Exception as e:
-            logger.error(f"Training failed: {e}")
-            raise
+            print(f"Could not create training plots: {e}")
 
 def main():
-    parser = argparse.ArgumentParser(description='Train trading ML model')
-    parser.add_argument('--model-name', default='swing_trader', help='Model name')
-    parser.add_argument('--data-path', required=True, help='Path to training data')
-    parser.add_argument('--model-path', default='/app/models', help='Path to save models')
+    """
+    Main training function
+    """
+    if len(sys.argv) < 2:
+        print("Usage: python train_model.py <training_data_pattern> [epochs]")
+        print("Example: python train_model.py training_data_*.json 100")
+        sys.exit(1)
 
-    args = parser.parse_args()
+    training_pattern = sys.argv[1]
+    epochs = int(sys.argv[2]) if len(sys.argv) > 2 else 50
 
-    trainer = TradingMLTrainer(args.model_name, args.model_path)
-    results = trainer.train(args.data_path)
+    print(f"Training ML model with pattern: {training_pattern}")
+    print(f"Epochs: {epochs}")
 
-    print(json.dumps(results, indent=2))
+    try:
+        # Initialize trainer
+        trainer = TradingModelTrainer()
+        trainer.epochs = epochs
+
+        # Load training data
+        samples = trainer.load_training_data(training_pattern)
+
+        if len(samples) < 100:
+            print(f"Warning: Only {len(samples)} training samples. Consider generating more data.")
+
+        # Prepare features and labels
+        features, labels, sample_info = trainer.prepare_features_and_labels(samples)
+
+        # Train model
+        model, history, scaler, label_encoder = trainer.train_model(features, labels)
+
+        # Plot training history
+        trainer.plot_training_history(history)
+
+        print("Training completed successfully!")
+
+    except Exception as e:
+        print(f"Training failed: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

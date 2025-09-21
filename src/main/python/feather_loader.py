@@ -1,7 +1,6 @@
 import pandas as pd
-import os
-import sys
 from pathlib import Path
+import sys
 
 class FeatherLoader:
     def __init__(self, data_dir="../../data"):
@@ -20,52 +19,70 @@ class FeatherLoader:
     def list_available_symbols(self):
         """Listázza az elérhető szimbólumokat"""
         symbols = set()
-
-        if not self.data_dir.exists():
-            print(f"❌ Data directory nem található: {self.data_dir}")
-            return []
-
         for file in self.data_dir.glob("*.feather"):
             # Példa: BTC_USDT-1d.feather -> BTC_USDT
             symbol = file.stem.rsplit('-', 1)[0]
             symbols.add(symbol)
-
         return sorted(list(symbols))
 
-    def load_symbol_data(self, symbol, timeframes=['1d', '4h', '1h', '30m']):
+    def load_symbol_data(self, symbol, timeframes=['1d', '4h', '1h', '30m'],
+                         start=None, end=None):
         """
-        Betölti egy szimbólum összes timeframe adatát
+        Betölti egy szimbólum összes timeframe adatát, opcionális szűréssel
 
         Args:
             symbol: pl. 'BTC_USDT', '1000SATS_USDT'
             timeframes: lista a kívánt timeframe-ekről
+            start: szűrés kezdete (string vagy datetime) → mindig UTC-re konvertálva
+            end: szűrés vége (string vagy datetime) → mindig UTC-re konvertálva
 
         Returns:
             dict: {timeframe: DataFrame}
         """
         data = {}
+        if start:
+            start = pd.to_datetime(start, utc=True)
+        if end:
+            end = pd.to_datetime(end, utc=True)
 
         for tf in timeframes:
             file_path = self.data_dir / f"{symbol}-{tf}.feather"
 
-            if file_path.exists():
-                try:
-                    df = pd.read_feather(file_path)
-                    data[tf] = df
-                    print(f"✅ Betöltve: {symbol}-{tf} -> {len(df)} sor")
-
-                    # Alapvető info
-                    if len(df) > 0:
-                        print(f"   Oszlopok: {list(df.columns)}")
-                        if 'timestamp' in df.columns or 'date' in df.columns:
-                            date_col = 'timestamp' if 'timestamp' in df.columns else 'date'
-                            print(f"   Időtartam: {df[date_col].min()} - {df[date_col].max()}")
-                        print(f"   Első sor: {dict(df.iloc[0])}")
-
-                except Exception as e:
-                    print(f"❌ Hiba {symbol}-{tf} betöltésekor: {e}")
-            else:
+            if not file_path.exists():
                 print(f"⚠️  Nem található: {file_path}")
+                continue
+
+            try:
+                df = pd.read_feather(file_path)
+
+                # ✅ Timestamp normalizálás UTC-re
+                if 'timestamp' in df.columns:
+                    df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
+                    date_col = 'timestamp'
+                elif 'date' in df.columns:
+                    df['date'] = pd.to_datetime(df['date'], utc=True)
+                    date_col = 'date'
+                else:
+                    print(f"❌ {file_path} nem tartalmaz dátum oszlopot")
+                    continue
+
+                # ✅ Szűrés (ha van start/end)
+                if start or end:
+                    mask = pd.Series(True, index=df.index)
+                    if start:
+                        mask &= df[date_col] >= start
+                    if end:
+                        mask &= df[date_col] <= end
+                    df = df.loc[mask]
+
+                data[tf] = df
+                print(f"✅ Betöltve: {symbol}-{tf} ({len(df)} sor)")
+
+                if len(df) > 0:
+                    print(f"   Időtartam: {df[date_col].min()} - {df[date_col].max()}")
+
+            except Exception as e:
+                print(f"❌ Hiba {symbol}-{tf} betöltésekor: {e}")
 
         return data
 
@@ -77,6 +94,13 @@ class FeatherLoader:
         for file_path in self.data_dir.glob(pattern):
             try:
                 df = pd.read_feather(file_path)
+
+                # UTC normalizálás
+                if 'timestamp' in df.columns:
+                    df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
+                elif 'date' in df.columns:
+                    df['date'] = pd.to_datetime(df['date'], utc=True)
+
                 files.append({
                     'file': file_path.name,
                     'size_mb': file_path.stat().st_size / 1024 / 1024,
@@ -92,85 +116,40 @@ class FeatherLoader:
 
         return files
 
+
 def main():
-    """Tesztelés és debug"""
     print("🚀 FeatherLoader Teszt\n")
 
     # Loader inicializálás
-    try:
-        # Automatikus path detection
-        current_dir = Path(__file__).parent
-        possible_data_dirs = [
-            current_dir / "../../data",           # E:/Codes/.../src/main/python -> E:/Codes/.../data
-            current_dir / "../../../data",        # Ha mélyebben van
-            Path("E:/Codes/trading.bot2/trading.bot/data"),  # Abszolút
-            current_dir / "data"                  # Ugyanabban a mappában
-        ]
+    current_dir = Path(__file__).parent
+    data_dir = current_dir / "../../data"
 
-        loader = None
-        for data_dir in possible_data_dirs:
-            if data_dir.exists():
-                print(f"✅ Data directory található: {data_dir}")
-                loader = FeatherLoader(str(data_dir))
-                break
+    loader = FeatherLoader(str(data_dir))
 
-        if not loader:
-            print("❌ Egyik data directory sem található:")
-            for d in possible_data_dirs:
-                print(f"   {d} -> {'létezik' if d.exists() else 'NEM létezik'}")
-            return
-
-    except Exception as e:
-        print(f"❌ FeatherLoader inicializálás hiba: {e}")
-        return
-
-    # Elérhető szimbólumok
-    print("\n📋 Elérhető szimbólumok:")
+    # Szimbólumok listázása
     symbols = loader.list_available_symbols()
+    print(f"📊 {len(symbols)} elérhető szimbólum")
     if symbols:
-        for i, symbol in enumerate(symbols[:10]):  # Első 10
-            print(f"   {i+1}. {symbol}")
-        if len(symbols) > 10:
-            print(f"   ... és még {len(symbols)-10} darab")
-        print(f"\n📊 Összesen: {len(symbols)} szimbólum")
-    else:
-        print("   ❌ Nincsenek elérhető szimbólumok")
-        return
+        print(f"Első 5: {symbols[:5]}")
 
-    # Teszt szimbólum betöltése
-    if len(sys.argv) > 1:
-        test_symbol = sys.argv[1]
-    else:
-        # Alapértelmezett teszteléshez
-        test_symbols = ['BTC_USDT', '1000SATS_USDT', 'ETH_USDT']
-        test_symbol = None
-        for s in test_symbols:
-            if s in symbols:
-                test_symbol = s
-                break
-
-        if not test_symbol:
-            test_symbol = symbols[0] if symbols else None
-
-    if test_symbol:
+    # Teszt betöltés szűréssel
+    if symbols:
+        test_symbol = symbols[0]
         print(f"\n🔍 Teszt szimbólum: {test_symbol}")
-        data = loader.load_symbol_data(test_symbol)
+        data = loader.load_symbol_data(
+            test_symbol,
+            timeframes=['1d', '4h'],
+            start="2024-01-01T00:00:00",
+            end="2024-03-01T00:00:00"
+        )
+        for tf, df in data.items():
+            print(f"   {tf}: {len(df)} sor")
 
-        if data:
-            print(f"\n📈 {test_symbol} összesítés:")
-            for tf, df in data.items():
-                print(f"   {tf}: {len(df)} sor, {df.memory_usage(deep=True).sum()/1024/1024:.2f} MB")
-        else:
-            print(f"❌ Nincs adat {test_symbol}-hez")
+    # File infó
+    print("\n📁 File info (első 3):")
+    for info in loader.get_file_info()[:3]:
+        print(info)
 
-    # File információk (első 5)
-    print(f"\n📁 File információk (első 5):")
-    files_info = loader.get_file_info()[:5]
-    for info in files_info:
-        if 'error' in info:
-            print(f"   ❌ {info['file']}: {info['error']}")
-        else:
-            print(f"   📄 {info['file']}: {info['rows']} sor, {info['size_mb']:.2f} MB")
 
 if __name__ == "__main__":
     main()

@@ -1,245 +1,60 @@
 #!/usr/bin/env python3
 """
-Deep Learning Trading Predictor
-Használja a SwingAlgoService adatait deep learning modellel
+ML Predictor - Java-Python Bridge
+Fogadja a SwingAlgoService technikai adatait és ML döntést hoz
 """
 
 import sys
 import json
 import numpy as np
 import pandas as pd
-import tensorflow as tf
-from tensorflow import keras
-from tensorflow.keras import layers
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-import warnings
-import os
 from datetime import datetime
-import joblib
+import os
+from pathlib import Path
 
-warnings.filterwarnings('ignore')
-tf.get_logger().setLevel('ERROR')
-
-class DeepTradingPredictor:
+class SwingTradingPredictor:
     def __init__(self):
         """
-        Deep Learning model trading predikcióhoz
+        Swing Trading ML Predictor
         """
-        self.model_path = 'src/main/python/models/deep_trading_model.h5'
-        self.scaler_path = 'src/main/python/models/scaler.pkl'
-        self.label_encoder_path = 'src/main/python/models/label_encoder.pkl'
+        self.version = "v1.0"
+        self.confidence_threshold = 0.65
 
-        # Mappák létrehozása
-        os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
+        # Model directory - resources/data under src/main/resources/data
+        self.model_dir = Path("src/main/resources/data/models")
+        self.model_dir.mkdir(parents=True, exist_ok=True)
 
-        # Model paraméterek
-        self.input_features = 25  # Java-ból jövő feature-ök száma
-        self.model = None
-        self.scaler = StandardScaler()
-        self.label_encoder = LabelEncoder()
+        print(f"SwingTradingPredictor {self.version} initialized")
 
-        # Betöltés vagy új model létrehozása
-        self.load_or_create_model()
-
-    def load_or_create_model(self):
-        """Model betöltése vagy új létrehozása"""
-        try:
-            if os.path.exists(self.model_path):
-                self.model = keras.models.load_model(self.model_path)
-                self.scaler = joblib.load(self.scaler_path)
-                self.label_encoder = joblib.load(self.label_encoder_path)
-                print("✅ Deep Learning model betöltve")
-            else:
-                self.create_deep_model()
-                print("🔧 Új Deep Learning model létrehozva")
-        except Exception as e:
-            print(f"❌ Model betöltési hiba: {e}")
-            self.create_deep_model()
-
-    def create_deep_model(self):
+    def predict_trading_signal(self, java_data):
         """
-        Deep Neural Network létrehozása
-        Inputok: SwingAlgoService technikai indikátorai
-        Output: LONG, SHORT, NO_TRADE + confidence
-        """
+        Fő predikciós logika - Java technikai adatok alapján
 
-        # Input layer - Java-ból jövő 25 feature
-        inputs = keras.Input(shape=(self.input_features,), name='trading_features')
-
-        # Deep Neural Network architektúra
-        # 1. réteg - Feature extraction
-        x = layers.Dense(128, activation='relu', name='feature_dense_1')(inputs)
-        x = layers.BatchNormalization(name='bn1')(x)
-        x = layers.Dropout(0.3, name='dropout1')(x)
-
-        # 2. réteg - Pattern recognition
-        x = layers.Dense(64, activation='relu', name='pattern_dense_1')(x)
-        x = layers.BatchNormalization(name='bn2')(x)
-        x = layers.Dropout(0.25, name='dropout2')(x)
-
-        # 3. réteg - Market regime detection
-        x = layers.Dense(32, activation='relu', name='regime_dense')(x)
-        x = layers.BatchNormalization(name='bn3')(x)
-        x = layers.Dropout(0.2, name='dropout3')(x)
-
-        # 4. réteg - Signal processing
-        x = layers.Dense(16, activation='relu', name='signal_dense')(x)
-        x = layers.Dropout(0.1, name='dropout4')(x)
-
-        # Output rétegek
-        # Signal prediction (3 classes: LONG=0, NO_TRADE=1, SHORT=2)
-        signal_output = layers.Dense(3, activation='softmax', name='signal_prediction')(x)
-
-        # Confidence prediction (regression 0-1)
-        confidence_output = layers.Dense(1, activation='sigmoid', name='confidence_prediction')(x)
-
-        # Model összeállítása
-        self.model = keras.Model(
-            inputs=inputs,
-            outputs=[signal_output, confidence_output],
-            name='DeepTradingPredictor'
-        )
-
-        # Optimizer és loss funkciók
-        self.model.compile(
-            optimizer=keras.optimizers.Adam(learning_rate=0.001),
-            loss={
-                'signal_prediction': 'categorical_crossentropy',
-                'confidence_prediction': 'mse'
-            },
-            loss_weights={
-                'signal_prediction': 0.8,  # Signal fontosabb
-                'confidence_prediction': 0.2
-            },
-            metrics={
-                'signal_prediction': ['accuracy'],
-                'confidence_prediction': ['mae']
-            }
-        )
-
-        print("🧠 Deep Learning architektúra:")
-        self.model.summary()
-
-    def extract_features_from_java_data(self, java_data):
-        """
-        SwingAlgoService adataiból feature-ök kinyerése
+        Input: SwingAlgoService által kalkulált technikai indikátorok
+        Output: LONG/SHORT/NO_TRADE + confidence
         """
         try:
-            features = []
+            symbol = java_data.get('symbol', 'UNKNOWN')
+            current_price = java_data.get('currentPrice', 0.0)
 
-            # 1. Trend Analysis adatok
-            trend = java_data.get('trendAnalysis', {})
-            features.extend([
-                1.0 if trend.get('primaryTrend') == 'BULLISH' else (-1.0 if trend.get('primaryTrend') == 'BEARISH' else 0.0),
-                1.0 if trend.get('shortTermTrend') == 'BULLISH' else (-1.0 if trend.get('shortTermTrend') == 'BEARISH' else 0.0),
-                1.0 if trend.get('trendAlignment', False) else 0.0,
-                float(trend.get('trendStrength', 0.0)),
-                float(trend.get('ema20_4h', 0.0)) / float(java_data.get('currentPrice', 1.0)),
-                float(trend.get('ema50_4h', 0.0)) / float(java_data.get('currentPrice', 1.0)),
-                ])
+            print(f"Analyzing {symbol} at price {current_price}")
 
-            # 2. Momentum Analysis adatok
-            momentum = java_data.get('momentumAnalysis', {})
-            features.extend([
-                float(momentum.get('rsi', 50.0)) / 100.0,  # Normalized RSI
-                1.0 if momentum.get('macdBullish', False) else 0.0,
-                1.0 if momentum.get('macdBearish', False) else 0.0,
-                1.0 if momentum.get('rsiBullishZone', False) else 0.0,
-                1.0 if momentum.get('rsiBearishZone', False) else 0.0,
-                1.0 if momentum.get('rsiRising', False) else 0.0,
-                ])
+            # Technikai indikátorok kinyerése
+            indicators = self.extract_technical_indicators(java_data)
 
-            # 3. Volume Analysis adatok
-            volume = java_data.get('volumeAnalysis', {})
-            features.extend([
-                float(volume.get('volumeRatio', 1.0)),
-                1.0 if volume.get('strongVolume', False) else 0.0,
-                float(volume.get('volumePercentile', 50.0)) / 100.0,
-                1.0 if volume.get('volumeBreakout', False) else 0.0,
-                1.0 if volume.get('volumeTrendUp', False) else 0.0,
-                ])
-
-            # 4. Risk Analysis adatok
-            risk = java_data.get('riskAnalysis', {})
-            features.extend([
-                float(risk.get('riskRewardRatio', 0.0)),
-                float(risk.get('volatilityPercent', 0.0)) / 100.0,
-                float(risk.get('distanceFromSupport', 0.0)) / 100.0,
-                float(risk.get('distanceFromResistance', 0.0)) / 100.0,
-                1.0 if risk.get('goodVolatility', False) else 0.0,
-                1.0 if risk.get('nearSupport', False) else 0.0,
-                ])
-
-            # 5. Structure Analysis adatok
-            structure = java_data.get('structureAnalysis', {})
-            features.extend([
-                1.0 if structure.get('higherHighs', False) else 0.0,
-                1.0 if structure.get('lowerLows', False) else 0.0,
-                1.0 if structure.get('bullishPattern', False) else 0.0,
-                1.0 if structure.get('bearishPattern', False) else 0.0,
-                float(structure.get('structureStrength', 0.0)),
-            ])
-
-            # Ha kevés feature van, 0-val töltjük fel 25-re
-            while len(features) < self.input_features:
-                features.append(0.0)
-
-            # Ha több van, levágjuk 25-re
-            features = features[:self.input_features]
-
-            return np.array(features, dtype=np.float32)
-
-        except Exception as e:
-            print(f"❌ Feature extraction error: {e}")
-            return np.zeros(self.input_features, dtype=np.float32)
-
-    def predict_signal(self, java_data):
-        """
-        Fő predikciós függvény
-        """
-        try:
-            # Feature-ök kinyerése Java adatokból
-            features = self.extract_features_from_java_data(java_data)
-
-            # Scaling (ha van betanított scaler)
-            if hasattr(self.scaler, 'scale_'):
-                features = self.scaler.transform(features.reshape(1, -1))[0]
-
-            # Predikció
-            features_input = features.reshape(1, -1)
-            signal_pred, confidence_pred = self.model.predict(features_input, verbose=0)
-
-            # Signal dekódolás
-            signal_class = np.argmax(signal_pred[0])
-            signal_confidence = float(np.max(signal_pred[0]))
-            confidence_value = float(confidence_pred[0][0])
-
-            # Signal mapping
-            signal_map = {0: "LONG", 1: "NO_TRADE", 2: "SHORT"}
-            predicted_signal = signal_map[signal_class]
-
-            # Kombinált confidence (signal + confidence prediction)
-            final_confidence = (signal_confidence + confidence_value) / 2.0
-
-            # Minimum confidence threshold
-            if final_confidence < 0.6:
-                predicted_signal = "NO_TRADE"
-                final_confidence = 0.5
+            # ML döntési logika
+            decision = self.make_trading_decision(indicators, symbol)
 
             return {
-                'predictedSignal': predicted_signal,
-                'confidence': final_confidence,
-                'probability': signal_confidence,
-                'rawPredictions': {
-                    'long_prob': float(signal_pred[0][0]),
-                    'no_trade_prob': float(signal_pred[0][1]),
-                    'short_prob': float(signal_pred[0][2]),
-                    'confidence_raw': confidence_value
-                }
+                'predictedSignal': decision['signal'],
+                'confidence': decision['confidence'],
+                'probability': decision['probability'],
+                'reasoning': decision['reasoning'],
+                'technicalScore': decision['technical_score']
             }
 
         except Exception as e:
-            print(f"❌ Prediction error: {e}")
+            print(f"Prediction error: {e}")
             return {
                 'predictedSignal': 'NO_TRADE',
                 'confidence': 0.0,
@@ -247,15 +62,248 @@ class DeepTradingPredictor:
                 'error': str(e)
             }
 
-    def save_model(self):
-        """Model mentése"""
+    def extract_technical_indicators(self, java_data):
+        """
+        Java TechnicalIndicators objektumból feature-ök kinyerése
+        """
+        indicators = {}
+
         try:
-            self.model.save(self.model_path)
-            joblib.dump(self.scaler, self.scaler_path)
-            joblib.dump(self.label_encoder, self.label_encoder_path)
-            print("✅ Model sikeresen elmentve")
+            tech = java_data.get('technicalIndicators', {})
+
+            # Trend indicators
+            indicators['primary_trend'] = self.convert_trend(tech.get('primaryTrend', 'NEUTRAL'))
+            indicators['short_term_trend'] = self.convert_trend(tech.get('shortTermTrend', 'NEUTRAL'))
+            indicators['trend_alignment'] = tech.get('trendAlignment', False)
+            indicators['trend_strength'] = tech.get('trendStrength', 0.0)
+
+            # Price vs EMAs
+            current_price = java_data.get('currentPrice', 1.0)
+            indicators['price_vs_ema20_4h'] = current_price / max(tech.get('ema20_4h', current_price), 0.1)
+            indicators['price_vs_ema50_4h'] = current_price / max(tech.get('ema50_4h', current_price), 0.1)
+            indicators['price_vs_ema200'] = current_price / max(tech.get('ema200_daily', current_price), 0.1)
+
+            # Momentum indicators
+            indicators['rsi'] = tech.get('rsi', 50.0)
+            indicators['rsi_normalized'] = (tech.get('rsi', 50.0) - 50.0) / 50.0
+            indicators['macd_bullish'] = tech.get('macdBullish', False)
+            indicators['macd_bearish'] = tech.get('macdBearish', False)
+            indicators['rsi_bullish_zone'] = tech.get('rsiBullishZone', False)
+            indicators['rsi_bearish_zone'] = tech.get('rsiBearishZone', False)
+            indicators['rsi_oversold'] = tech.get('rsiOversold', False)
+            indicators['rsi_overbought'] = tech.get('rsiOverbought', False)
+            indicators['rsi_rising'] = tech.get('rsiRising', False)
+
+            # Volume indicators
+            indicators['volume_ratio'] = tech.get('volumeRatio', 1.0)
+            indicators['strong_volume'] = tech.get('strongVolume', False)
+            indicators['volume_breakout'] = tech.get('volumeBreakout', False)
+            indicators['volume_trend_up'] = tech.get('volumeTrendUp', False)
+
+            # Risk indicators
+            indicators['volatility_percent'] = tech.get('volatilityPercent', 0.0)
+            indicators['risk_reward_ratio'] = tech.get('riskRewardRatio', 0.0)
+            indicators['distance_from_support'] = tech.get('distanceFromSupport', 0.0)
+            indicators['distance_from_resistance'] = tech.get('distanceFromResistance', 0.0)
+
+            # Structure indicators
+            indicators['bullish_structure'] = tech.get('bullishStructure', False)
+            indicators['bearish_structure'] = tech.get('bearishStructure', False)
+            indicators['higher_highs'] = tech.get('higherHighs', False)
+            indicators['lower_lows'] = tech.get('lowerLows', False)
+            indicators['consolidation'] = tech.get('consolidation', False)
+
+            return indicators
+
         except Exception as e:
-            print(f"❌ Model mentési hiba: {e}")
+            print(f"Indicator extraction error: {e}")
+            return {}
+
+    def make_trading_decision(self, indicators, symbol):
+        """
+        ML-alapú trading döntés
+        """
+        # Alapértelmezett értékek
+        signal = 'NO_TRADE'
+        confidence = 0.0
+        probability = 0.5
+        reasoning = []
+        technical_score = 0.0
+
+        try:
+            # === BULLISH SCORE CALCULATION ===
+            bullish_score = 0.0
+
+            # Trend scoring (max 30 points)
+            if indicators.get('primary_trend', 0) > 0:
+                bullish_score += 12
+                reasoning.append("Primary trend bullish")
+            if indicators.get('short_term_trend', 0) > 0:
+                bullish_score += 8
+                reasoning.append("Short-term trend bullish")
+            if indicators.get('trend_alignment', False) and indicators.get('primary_trend', 0) > 0:
+                bullish_score += 10
+                reasoning.append("Trend alignment bullish")
+
+            # Price vs EMA scoring (max 15 points)
+            if indicators.get('price_vs_ema20_4h', 1.0) > 1.02:
+                bullish_score += 5
+                reasoning.append("Price above EMA20")
+            if indicators.get('price_vs_ema50_4h', 1.0) > 1.01:
+                bullish_score += 5
+                reasoning.append("Price above EMA50")
+            if indicators.get('price_vs_ema200', 1.0) > 1.005:
+                bullish_score += 5
+                reasoning.append("Price above EMA200")
+
+            # RSI scoring (max 20 points)
+            rsi = indicators.get('rsi', 50.0)
+            if indicators.get('rsi_oversold', False):
+                bullish_score += 15
+                reasoning.append("RSI oversold - bounce expected")
+            elif 35 < rsi < 65 and indicators.get('rsi_rising', False):
+                bullish_score += 10
+                reasoning.append("RSI rising in healthy zone")
+            elif indicators.get('rsi_bullish_zone', False):
+                bullish_score += 5
+                reasoning.append("RSI in bullish zone")
+
+            # MACD scoring (max 10 points)
+            if indicators.get('macd_bullish', False):
+                bullish_score += 10
+                reasoning.append("MACD bullish crossover")
+
+            # Volume scoring (max 15 points)
+            if indicators.get('strong_volume', False):
+                bullish_score += 8
+                reasoning.append("Strong volume support")
+            if indicators.get('volume_breakout', False):
+                bullish_score += 7
+                reasoning.append("Volume breakout")
+
+            # Structure scoring (max 10 points)
+            if indicators.get('bullish_structure', False):
+                bullish_score += 6
+                reasoning.append("Bullish market structure")
+            if indicators.get('higher_highs', False):
+                bullish_score += 4
+                reasoning.append("Higher highs pattern")
+
+            # === BEARISH SCORE CALCULATION ===
+            bearish_score = 0.0
+
+            # Trend scoring (max -30 points)
+            if indicators.get('primary_trend', 0) < 0:
+                bearish_score -= 12
+                reasoning.append("Primary trend bearish")
+            if indicators.get('short_term_trend', 0) < 0:
+                bearish_score -= 8
+                reasoning.append("Short-term trend bearish")
+            if indicators.get('trend_alignment', False) and indicators.get('primary_trend', 0) < 0:
+                bearish_score -= 10
+                reasoning.append("Trend alignment bearish")
+
+            # Price vs EMA scoring (max -15 points)
+            if indicators.get('price_vs_ema20_4h', 1.0) < 0.98:
+                bearish_score -= 5
+                reasoning.append("Price below EMA20")
+            if indicators.get('price_vs_ema50_4h', 1.0) < 0.99:
+                bearish_score -= 5
+                reasoning.append("Price below EMA50")
+            if indicators.get('price_vs_ema200', 1.0) < 0.995:
+                bearish_score -= 5
+                reasoning.append("Price below EMA200")
+
+            # RSI scoring (max -20 points)
+            if indicators.get('rsi_overbought', False):
+                bearish_score -= 15
+                reasoning.append("RSI overbought - correction expected")
+            elif 35 < rsi < 65 and not indicators.get('rsi_rising', False):
+                bearish_score -= 8
+                reasoning.append("RSI falling")
+            elif indicators.get('rsi_bearish_zone', False):
+                bearish_score -= 5
+                reasoning.append("RSI in bearish zone")
+
+            # MACD scoring (max -10 points)
+            if indicators.get('macd_bearish', False):
+                bearish_score -= 10
+                reasoning.append("MACD bearish crossover")
+
+            # Structure scoring (max -10 points)
+            if indicators.get('bearish_structure', False):
+                bearish_score -= 6
+                reasoning.append("Bearish market structure")
+            if indicators.get('lower_lows', False):
+                bearish_score -= 4
+                reasoning.append("Lower lows pattern")
+
+            # === RISK MANAGEMENT ===
+            risk_penalty = 0.0
+
+            # Volatility check
+            volatility = indicators.get('volatility_percent', 0.0)
+            if volatility > 15.0:
+                risk_penalty -= 10
+                reasoning.append(f"High volatility risk: {volatility:.1f}%")
+
+            # Risk/Reward ratio
+            rr_ratio = indicators.get('risk_reward_ratio', 0.0)
+            if rr_ratio < 1.5:
+                risk_penalty -= 8
+                reasoning.append(f"Poor R:R ratio: {rr_ratio:.2f}")
+            elif rr_ratio > 3.0:
+                bullish_score += 5
+                reasoning.append(f"Excellent R:R ratio: {rr_ratio:.2f}")
+
+            # === FINAL DECISION ===
+            total_score = bullish_score + bearish_score + risk_penalty
+            technical_score = total_score
+
+            # Decision thresholds
+            if total_score >= 25:
+                signal = 'LONG'
+                confidence = min(0.95, (total_score - 15) / 50 + 0.65)
+                probability = 0.7 + min(0.25, total_score / 100)
+            elif total_score <= -25:
+                signal = 'SHORT'
+                confidence = min(0.95, abs(total_score - 15) / 50 + 0.65)
+                probability = 0.7 + min(0.25, abs(total_score) / 100)
+            else:
+                signal = 'NO_TRADE'
+                confidence = 0.5 - abs(total_score) / 100
+                probability = 0.5
+                reasoning.append("Insufficient signal strength")
+
+            # Confidence threshold check
+            if confidence < self.confidence_threshold:
+                signal = 'NO_TRADE'
+                confidence = max(0.1, confidence * 0.8)
+                reasoning.append(f"Below confidence threshold: {self.confidence_threshold}")
+
+            print(f"Decision: {signal}, Score: {total_score:.1f}, Confidence: {confidence:.2f}")
+            print(f"Reasoning: {'; '.join(reasoning[:5])}")  # Top 5 reasons
+
+        except Exception as e:
+            print(f"Decision making error: {e}")
+            reasoning.append(f"Error in calculation: {str(e)}")
+
+        return {
+            'signal': signal,
+            'confidence': confidence,
+            'probability': probability,
+            'reasoning': reasoning,
+            'technical_score': technical_score
+        }
+
+    def convert_trend(self, trend_str):
+        """Trend string konvertálása numerikus értékre"""
+        if trend_str == 'BULLISH':
+            return 1.0
+        elif trend_str == 'BEARISH':
+            return -1.0
+        else:
+            return 0.0
 
 def main():
     """
@@ -270,54 +318,62 @@ def main():
 
     try:
         # Input adatok beolvasása Java-ból
-        with open(input_file, 'r') as f:
+        with open(input_file, 'r', encoding='utf-8') as f:
             request_data = json.load(f)
 
-        print(f"📊 Processing prediction for: {request_data.get('symbol', 'UNKNOWN')}")
+        symbol = request_data.get('symbol', 'UNKNOWN')
+        print(f"Processing ML prediction for: {symbol}")
 
-        # Deep Learning Predictor inicializálása
-        predictor = DeepTradingPredictor()
+        # Predictor inicializálása
+        predictor = SwingTradingPredictor()
 
         # Predikció végrehajtása
         start_time = datetime.now()
-        result = predictor.predict_signal(request_data)
+        result = predictor.predict_trading_signal(request_data)
         processing_time = (datetime.now() - start_time).total_seconds() * 1000
 
         # Response összeállítása
         response = {
-            'symbol': request_data.get('symbol', 'UNKNOWN'),
+            'symbol': symbol,
             'predictedSignal': result['predictedSignal'],
             'confidence': result['confidence'],
             'probability': result['probability'],
-            'modelVersion': 'DeepLearning_v1.0',
+            'modelVersion': f'SwingPredictor_{predictor.version}',
             'processingTimeMs': processing_time,
-            'additionalMetrics': result.get('rawPredictions', {})
+            'reasoning': result.get('reasoning', []),
+            'technicalScore': result.get('technical_score', 0.0)
         }
 
         if 'error' in result:
             response['error'] = result['error']
 
         # Eredmény mentése
-        with open(output_file, 'w') as f:
-            json.dump(response, f, indent=2)
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(response, f, indent=2, ensure_ascii=False)
 
-        print(f"✅ Prediction complete: {result['predictedSignal']} ({result['confidence']:.2f})")
+        print(f"Prediction complete: {result['predictedSignal']} ({result['confidence']:.2f} confidence)")
+        if result.get('reasoning'):
+            print(f"Key factors: {'; '.join(result['reasoning'][:3])}")
 
     except Exception as e:
         # Hiba esetén default válasz
         error_response = {
-            'symbol': 'ERROR',
+            'symbol': request_data.get('symbol', 'ERROR') if 'request_data' in locals() else 'ERROR',
             'predictedSignal': 'NO_TRADE',
             'confidence': 0.0,
             'probability': 0.5,
             'error': str(e),
-            'processingTimeMs': 0
+            'processingTimeMs': 0,
+            'modelVersion': 'SwingPredictor_v1.0'
         }
 
-        with open(output_file, 'w') as f:
-            json.dump(error_response, f, indent=2)
+        try:
+            with open(output_file, 'w', encoding='utf-8') as f:
+                json.dump(error_response, f, indent=2, ensure_ascii=False)
+        except:
+            pass
 
-        print(f"❌ Error: {e}")
+        print(f"Error: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":

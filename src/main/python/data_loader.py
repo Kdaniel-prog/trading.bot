@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 logger = logging.getLogger(__name__)
 
 class FeatherDataProcessor:
-    def __init__(self, feather_data_path: str = "/app/data/feather"):
+    def __init__(self, feather_data_path: str = "/app/data"):
         self.data_path = Path(feather_data_path)
         self.supported_timeframes = ["30m", "1h", "4h", "1d"]
 

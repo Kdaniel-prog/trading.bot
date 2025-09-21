@@ -2,6 +2,18 @@ spring:
   application:
     name: bot
 
+  # Training Configuration - NEW
+training:
+  data:
+    directory: src/main/resources/data/training
+  auto:
+    generate: false  # Auto-generate training data from backtests
+  batch:
+    size: 32
+  epochs: 50
+  validation:
+    split: 0.2
+# ML Configuration
 
 # Python Configuration
 python:
@@ -11,12 +23,30 @@ python:
       path: src/main/python/ml_predictor.py
     timeout: 10
 
-# BACKTEST Configuration - NEW
+# ML Configuration
+ml:
+  enabled: true
+  weight: 0.7
+  confidence:
+    threshold: 0.6
+  prediction:
+    timeout: 30
+    cache_duration: 900
+
+# BACKTEST Configuration - Updated for resources directory
 backtest:
-  # Data Configuration
+  # Data Configuration - Use resources directory
   data:
     feather:
-      directory: src/main/python/data
+      directory: src/main/resources/data  # Changed from src/main/python/data
+
+  # Python Configuration
+  python:
+    ml:
+      script:
+        path: src/main/python/ml_predictor.py
+      models:
+        path: src/main/resources/data/models  # Models in resources
 
   # Startup Configuration
   run:
@@ -55,6 +85,18 @@ backtest:
         symbol:
           analysis: true
       optimization: false
+
+  # Training Configuration - NEW
+  training:
+    data:
+      directory: src/main/resources/data/training
+    auto:
+      generate: false  # Auto-generate training data from backtests
+    batch:
+      size: 32
+    epochs: 50
+    validation:
+      split: 0.2
 
   # Performance Configuration
   performance:
