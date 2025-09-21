@@ -12,6 +12,7 @@ from datetime import datetime
 import os
 from pathlib import Path
 
+
 class SwingTradingPredictor:
     def __init__(self):
         """
@@ -71,14 +72,23 @@ class SwingTradingPredictor:
         try:
             tech = java_data.get('technicalIndicators', {})
 
+            # Get current price from multiple sources
+            current_price = java_data.get('currentPrice',
+                                          tech.get('currentPrice',
+                                                   java_data.get('price', 1.0)))
+
+            if current_price <= 0:
+                current_price = 1.0
+
+            indicators['current_price'] = current_price
+
             # Trend indicators
             indicators['primary_trend'] = self.convert_trend(tech.get('primaryTrend', 'NEUTRAL'))
             indicators['short_term_trend'] = self.convert_trend(tech.get('shortTermTrend', 'NEUTRAL'))
             indicators['trend_alignment'] = tech.get('trendAlignment', False)
             indicators['trend_strength'] = tech.get('trendStrength', 0.0)
 
-            # Price vs EMAs
-            current_price = java_data.get('currentPrice', 1.0)
+            # Price vs EMAs (handle division by zero)
             indicators['price_vs_ema20_4h'] = current_price / max(tech.get('ema20_4h', current_price), 0.1)
             indicators['price_vs_ema50_4h'] = current_price / max(tech.get('ema50_4h', current_price), 0.1)
             indicators['price_vs_ema200'] = current_price / max(tech.get('ema200_daily', current_price), 0.1)
@@ -95,7 +105,8 @@ class SwingTradingPredictor:
             indicators['rsi_rising'] = tech.get('rsiRising', False)
 
             # Volume indicators
-            indicators['volume_ratio'] = tech.get('volumeRatio', 1.0)
+            volume_ratio = tech.get('volumeRatio', 1.0)
+            indicators['volume_ratio'] = volume_ratio
             indicators['strong_volume'] = tech.get('strongVolume', False)
             indicators['volume_breakout'] = tech.get('volumeBreakout', False)
             indicators['volume_trend_up'] = tech.get('volumeTrendUp', False)
@@ -117,7 +128,7 @@ class SwingTradingPredictor:
 
         except Exception as e:
             print(f"Indicator extraction error: {e}")
-            return {}
+            return {'current_price': java_data.get('currentPrice', 1.0)}
 
     def make_trading_decision(self, indicators, symbol):
         """
@@ -305,6 +316,7 @@ class SwingTradingPredictor:
         else:
             return 0.0
 
+
 def main():
     """
     Fő függvény - Java hívja meg
@@ -375,6 +387,7 @@ def main():
 
         print(f"Error: {e}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

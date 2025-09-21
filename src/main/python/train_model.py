@@ -1,565 +1,509 @@
+#!/usr/bin/env python3
 """
-Directional Trading Model - Long/Short/Hold prediction
-Supports Binance Futures trading with directional signals
+ML Model Training Script - First Run Compatible
+Uses backtest results to train the trading prediction model
 """
 
-import json
-import pickle
 import sys
-from pathlib import Path
-import glob
-import logging
-import pandas as pd
+import json
 import numpy as np
-from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report, confusion_matrix
-from sklearn.model_selection import train_test_split
-import xgboost as xgb
+import pandas as pd
+import tensorflow as tf
 from tensorflow import keras
-from datetime import datetime
+from tensorflow.keras import layers
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, confusion_matrix
 import warnings
+import os
+from pathlib import Path
+from datetime import datetime
+import joblib
+
 warnings.filterwarnings('ignore')
+tf.get_logger().setLevel('ERROR')
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
 
-class DirectionalTradingModelTrainer:
-    def __init__(self, keep_latest_models=5, prediction_mode="directional"):
+class TradingModelTrainer:
+    def __init__(self):
         """
-        Directional trader that predicts LONG/SHORT/HOLD
-
-        prediction_mode:
-        - "directional": 3-class (LONG/SHORT/HOLD)
-        - "multi_output": Separate models for direction and confidence
+        Trading Model Trainer - uses backtest results for supervised learning
         """
-        # Path setup
-        script_dir = Path(__file__).parent
-        project_root = script_dir.parent.parent
-
-        possible_data_paths = [
-            Path("E:/work/trading.bot/src/data"),
-            project_root / "src" / "data",
-            script_dir.parent / "data"
-        ]
-
-        self.base_dir = None
-        for data_path in possible_data_paths:
-            if data_path.exists():
-                self.base_dir = data_path
-                break
-
-        if self.base_dir is None:
-            self.base_dir = Path("E:/work/trading.bot/src/data")
-
+        # Paths - save to resources/data
+        self.base_dir = Path("src/main/resources/data")
         self.model_dir = self.base_dir / "models"
         self.training_dir = self.base_dir / "training"
+
+        # Create directories
         self.model_dir.mkdir(parents=True, exist_ok=True)
         self.training_dir.mkdir(parents=True, exist_ok=True)
 
-        self.models = {}
-        self.scaler = StandardScaler()
-        self.label_encoder = None
-        self.feature_encoder = None
-        self.keep_latest_models = keep_latest_models
-        self.prediction_mode = prediction_mode
+        # Model files
+        self.model_path = self.model_dir / "swing_trading_model.h5"
+        self.scaler_path = self.model_dir / "feature_scaler.pkl"
+        self.label_encoder_path = self.model_dir / "label_encoder.pkl"
+        self.metadata_path = self.model_dir / "model_metadata.json"
 
-        logger.info(f"Using data directory: {self.base_dir}")
-        logger.info(f"Prediction mode: {prediction_mode}")
+        # Training parameters - adaptable
+        self.feature_dim = 25  # Will be adjusted based on data
+        self.epochs = 50
+        self.batch_size = 32
+        self.validation_split = 0.2
 
-    def load_training_data(self, pattern="training_data_*.json"):
-        """Load training data"""
-        possible_patterns = [
-            str(self.training_dir / pattern),
-            str(self.base_dir / pattern),
-            pattern
-        ]
+        print(f"TradingModelTrainer initialized")
+        print(f"Models will be saved to: {self.model_dir}")
 
-        files = []
-        for pat in possible_patterns:
-            found_files = glob.glob(pat)
-            if found_files:
-                files = found_files
-                break
-
-        if not files:
-            raise FileNotFoundError(f"No training files found with pattern {pattern}")
-
-        latest_file = max(files, key=lambda f: Path(f).stat().st_mtime)
-        logger.info(f"Loading training data from: {latest_file}")
-
-        with open(latest_file, "r") as f:
-            data = json.load(f)
-
-        samples = data["samples"]
-        logger.info(f"Loaded {len(samples)} training samples")
-
-        return samples
-
-    def create_directional_labels(self, df):
+    def load_training_data(self, training_file_pattern="training_data_*.json"):
         """
-        Create directional labels from training data
-
-        Expected data structure in samples:
-        - actualOutcome: PROFIT/LOSS/NEUTRAL
-        - actualSignal: BUY/SELL/HOLD (if available)
-        - actualReturn: numeric return percentage
+        Load training data from backtest results
         """
-        logger.info("=== CREATING DIRECTIONAL LABELS ===")
+        training_files = list(self.training_dir.glob(training_file_pattern))
 
-        # Method 1: Use actualSignal if available
-        if "actualSignal" in df.columns and df["actualSignal"].notna().any():
-            logger.info("Using actualSignal for direction")
-            signal_col = df["actualSignal"]
+        if not training_files:
+            # Also check other common locations
+            alt_dirs = [
+                Path("src/data/training"),
+                Path("data/training"),
+                Path(".")
+            ]
+            for alt_dir in alt_dirs:
+                if alt_dir.exists():
+                    alt_files = list(alt_dir.glob(training_file_pattern))
+                    if alt_files:
+                        training_files = alt_files
+                        break
 
-            # Map signals to directions
-            direction_map = {
-                'BUY': 1, 'LONG': 1, 'UP': 1,
-                'SELL': 2, 'SHORT': 2, 'DOWN': 2,
-                'HOLD': 0, 'WAIT': 0, 'NEUTRAL': 0, 'NO_SIGNAL': 0
-            }
+        if not training_files:
+            raise FileNotFoundError(f"No training files found matching pattern: {training_file_pattern}")
 
-            # Map using string matching
-            directions = signal_col.astype(str).str.upper().map(direction_map)
+        print(f"Found {len(training_files)} training files")
 
-            # Fill unmapped with HOLD
-            directions = directions.fillna(0)
+        all_samples = []
 
-        # Method 2: Use actualReturn for direction
-        elif "actualReturn" in df.columns and df["actualReturn"].notna().any():
-            logger.info("Using actualReturn for direction")
-            returns = df["actualReturn"].astype(float)
+        for file_path in training_files:
+            try:
+                # Handle UTF-8 BOM from PowerShell
+                with open(file_path, 'r', encoding='utf-8-sig') as f:
+                    data = json.load(f)
 
-            # Define thresholds for meaningful moves
-            long_threshold = 0.5   # 0.5% gain for LONG
-            short_threshold = -0.5 # 0.5% loss for SHORT
-
-            directions = np.where(returns > long_threshold, 1,    # LONG
-                         np.where(returns < short_threshold, 2,   # SHORT
-                                  0))                             # HOLD
-
-        # Method 3: Use actualOutcome with synthetic direction
-        elif "actualOutcome" in df.columns:
-            logger.info("Using actualOutcome with synthetic direction")
-            outcome_col = df["actualOutcome"].astype(str).str.upper()
-
-            # If we have profit/loss but no direction, we need to guess
-            # This is not ideal but works for initial training
-
-            directions = []
-            for i, outcome in enumerate(outcome_col):
-                if outcome in ['PROFIT', 'WIN', 'POSITIVE']:
-                    # Randomly assign LONG or SHORT for profitable trades
-                    # In practice, this should come from your actual trading logic
-                    directions.append(np.random.choice([1, 2]))
+                # Handle different data structures
+                samples = []
+                if 'samples' in data:
+                    samples = data['samples']
+                elif isinstance(data, list):
+                    samples = data
                 else:
-                    directions.append(0)  # HOLD for losses/neutral
+                    print(f"Warning: Unrecognized data structure in {file_path}")
+                    continue
 
+                print(f"Loaded {len(samples)} samples from {file_path.name}")
+                all_samples.extend(samples)
+
+            except Exception as e:
+                print(f"Error loading {file_path}: {e}")
+
+        print(f"Total training samples: {len(all_samples)}")
+        return all_samples
+
+    def detect_data_format(self, sample):
+        """
+        Detect if this is complex technical indicators data or simple trade data
+        """
+        if 'technicalIndicators' in sample:
+            return 'complex'
+        elif 'direction' in sample and 'pnl_percent' in sample:
+            return 'simple'
         else:
-            raise ValueError("No suitable columns found for direction labeling!")
+            return 'unknown'
 
-        directions = np.array(directions, dtype=int)
+    def prepare_features_and_labels(self, samples):
+        """
+        Convert samples to ML features and labels - handles both formats
+        """
+        if not samples:
+            raise ValueError("No samples provided")
 
-        # Log distribution
-        direction_counts = pd.Series(directions).value_counts().sort_index()
-        direction_labels = {0: 'HOLD', 1: 'LONG', 2: 'SHORT'}
+        # Detect data format
+        data_format = self.detect_data_format(samples[0])
+        print(f"Detected data format: {data_format}")
 
-        logger.info("Direction distribution:")
-        for direction, count in direction_counts.items():
-            label = direction_labels.get(direction, f"Unknown_{direction}")
-            percentage = count / len(directions) * 100
-            logger.info(f"  {label}: {count} ({percentage:.1f}%)")
-
-        # Check for reasonable distribution
-        if len(direction_counts) < 2:
-            logger.warning("Only one direction class found - this will cause training issues!")
-
-        total_action = direction_counts.get(1, 0) + direction_counts.get(2, 0)
-        hold_ratio = direction_counts.get(0, 0) / len(directions)
-
-        if hold_ratio > 0.8:
-            logger.warning(f"Too many HOLD signals ({hold_ratio:.1%}) - consider adjusting thresholds")
-
-        return directions
-
-    def debug_and_prepare_data(self, samples):
-        """Debug data and prepare features/labels for directional trading"""
-        logger.info("=== DATA PREPARATION FOR DIRECTIONAL TRADING ===")
-
-        df = pd.DataFrame(samples)
-        logger.info(f"Original samples: {len(df)}")
-        logger.info(f"Columns: {df.columns.tolist()}")
-
-        # Expand technical indicators
-        if "technicalIndicators" in df.columns:
-            indicators = pd.json_normalize(df["technicalIndicators"])
-            df = pd.concat([df.drop(columns=["technicalIndicators"]), indicators], axis=1)
-            logger.info(f"After expanding indicators: {len(df.columns)} columns")
-
-        # Create directional labels
-        directions = self.create_directional_labels(df)
-
-        # Prepare features
-        drop_cols = [
-            "symbol", "timestamp", "timeframe", "actualSignal",
-            "actualReturn", "actualOutcome", "exitReason"
-        ]
-        features_df = df.drop(columns=[c for c in drop_cols if c in df.columns])
-
-        # Handle categorical columns
-        categorical_cols = features_df.select_dtypes(include=["object", "bool"]).columns.tolist()
-        numeric_cols = features_df.select_dtypes(exclude=["object", "bool"]).columns.tolist()
-
-        logger.info(f"Categorical columns ({len(categorical_cols)}): {categorical_cols}")
-        logger.info(f"Numeric columns ({len(numeric_cols)}): {numeric_cols}")
-
-        # One-hot encode categorical variables
-        if categorical_cols:
-            if self.feature_encoder is None:
-                self.feature_encoder = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
-                cat_encoded = self.feature_encoder.fit_transform(features_df[categorical_cols].astype(str))
-            else:
-                cat_encoded = self.feature_encoder.transform(features_df[categorical_cols].astype(str))
-
-            cat_feature_names = self.feature_encoder.get_feature_names_out(categorical_cols)
-            cat_df = pd.DataFrame(cat_encoded, columns=cat_feature_names, index=features_df.index)
+        if data_format == 'complex':
+            return self._prepare_complex_features(samples)
+        elif data_format == 'simple':
+            return self._prepare_simple_features(samples)
         else:
-            cat_df = pd.DataFrame(index=features_df.index)
+            raise ValueError("Unknown data format")
 
-        # Combine features
-        num_df = features_df[numeric_cols]
-        final_features = pd.concat([num_df, cat_df], axis=1)
+    def _prepare_complex_features(self, samples):
+        """
+        Handle complex technical indicators data (original format)
+        """
+        features = []
+        labels = []
+        sample_info = []
 
-        # Clean data
-        nan_count = final_features.isna().sum().sum()
-        if nan_count > 0:
-            logger.warning(f"Found {nan_count} NaN values, filling with 0")
-            final_features = final_features.fillna(0)
+        for sample in samples:
+            try:
+                tech = sample.get('technicalIndicators', {})
+                feature_vector = self.extract_feature_vector(tech, sample)
+                trade_outcome = sample.get('actualOutcome', 'NO_TRADE')
 
-        numeric_features = final_features.select_dtypes(include=[np.number])
-        inf_mask = np.isinf(numeric_features)
-        if inf_mask.any().any():
-            logger.warning("Found infinite values, replacing with 0")
-            final_features = final_features.replace([np.inf, -np.inf], 0)
+                if trade_outcome == 'NO_TRADE':
+                    continue
 
-        features = final_features.values
+                features.append(feature_vector)
+                labels.append(trade_outcome)
 
-        logger.info(f"Final feature matrix shape: {features.shape}")
-        logger.info(f"Feature stats: min={features.min():.3f}, max={features.max():.3f}")
+                sample_info.append({
+                    'symbol': sample.get('symbol', 'UNKNOWN'),
+                    'timestamp': sample.get('timestamp'),
+                    'actualReturn': sample.get('actualReturn', 0.0),
+                    'holdingTimeHours': sample.get('holdingTimeHours', 0)
+                })
 
-        return features, directions, final_features.columns.tolist()
+            except Exception as e:
+                print(f"Error processing complex sample: {e}")
+                continue
 
-    def create_directional_neural_network(self, input_dim, n_classes=3):
-        """Create neural network for directional prediction"""
+        features = np.array(features, dtype=np.float32)
+        labels = np.array(labels)
 
-        model = keras.Sequential([
-            keras.layers.Dense(256, input_shape=(input_dim,), activation='relu',
-                             kernel_regularizer=keras.regularizers.l2(0.001)),
-            keras.layers.BatchNormalization(),
-            keras.layers.Dropout(0.4),
+        print(f"Prepared {len(features)} complex samples with {features.shape[1]} features")
+        return features, labels, sample_info
 
-            keras.layers.Dense(128, activation='relu',
-                             kernel_regularizer=keras.regularizers.l2(0.001)),
-            keras.layers.BatchNormalization(),
-            keras.layers.Dropout(0.3),
+    def _prepare_simple_features(self, samples):
+        """
+        Handle simple trade data (PowerShell generated mock data)
+        """
+        features = []
+        labels = []
+        sample_info = []
 
-            keras.layers.Dense(64, activation='relu'),
-            keras.layers.Dropout(0.2),
+        for sample in samples:
+            try:
+                # Extract simple features from trade data
+                pnl_percent = float(sample.get('pnl_percent', 0.0))
+                direction = sample.get('direction', 'long').lower()
+                score = float(sample.get('score', 0.5))
+                entry_price = float(sample.get('entry_price', 1.0))
+                exit_price = float(sample.get('exit_price', entry_price))
 
-            keras.layers.Dense(32, activation='relu'),
-            keras.layers.Dropout(0.1),
+                # Create simple feature vector (10 features for first run)
+                price_change = (exit_price - entry_price) / entry_price if entry_price > 0 else 0.0
 
-            # Output layer for 3 classes (HOLD/LONG/SHORT)
-            keras.layers.Dense(n_classes, activation='softmax')
+                feature_vector = [
+                    1.0 if direction == 'long' else -1.0,  # Direction
+                    score,  # Confidence/Score
+                    abs(pnl_percent) / 10.0,  # Normalized absolute PnL
+                    1.0 if pnl_percent > 0 else 0.0,  # Profitable
+                    price_change,  # Price change ratio
+                    1.0 if abs(pnl_percent) > 2.0 else 0.0,  # Significant move
+                    min(abs(score - 0.5) * 2, 1.0),  # Score confidence
+                    1.0 if pnl_percent > 5.0 else 0.0,  # High profit
+                    1.0 if pnl_percent < -5.0 else 0.0,  # High loss
+                    np.random.normal(0.0, 0.1)  # Random noise for generalization
+                ]
+
+                # Determine label from actual outcome
+                if sample.get('successful', pnl_percent > 0):
+                    label = 'PROFIT'
+                elif pnl_percent < -2.0:
+                    label = 'LOSS'
+                else:
+                    label = 'NEUTRAL'
+
+                features.append(feature_vector)
+                labels.append(label)
+
+                sample_info.append({
+                    'symbol': sample.get('symbol', 'UNKNOWN'),
+                    'timestamp': sample.get('entry_time', ''),
+                    'actualReturn': pnl_percent,
+                    'direction': direction
+                })
+
+            except Exception as e:
+                print(f"Error processing simple sample: {e}")
+                continue
+
+        # Update feature dimension for simple format
+        self.feature_dim = 10
+
+        features = np.array(features, dtype=np.float32)
+        labels = np.array(labels)
+
+        print(f"Prepared {len(features)} simple samples with {features.shape[1]} features")
+        return features, labels, sample_info
+
+    def extract_feature_vector(self, tech_indicators, sample):
+        """
+        Extract numerical feature vector from technical indicators (complex format)
+        """
+        features = []
+
+        current_price = sample.get('currentPrice', tech_indicators.get('currentPrice', 1.0))
+        if current_price <= 0:
+            current_price = 1.0
+
+        # 1. Trend features (6 features)
+        features.extend([
+            1.0 if tech_indicators.get('primaryTrend') == 'BULLISH' else (
+                -1.0 if tech_indicators.get('primaryTrend') == 'BEARISH' else 0.0),
+            1.0 if tech_indicators.get('shortTermTrend') == 'BULLISH' else (
+                -1.0 if tech_indicators.get('shortTermTrend') == 'BEARISH' else 0.0),
+            1.0 if tech_indicators.get('trendAlignment', False) else 0.0,
+            float(tech_indicators.get('trendStrength', 0.0)),
+            float(tech_indicators.get('ema20_4h', current_price)) / current_price,
+            float(tech_indicators.get('ema50_4h', current_price)) / current_price
         ])
 
-        # Use categorical crossentropy for multi-class
-        optimizer = keras.optimizers.Adam(learning_rate=0.0005, clipnorm=1.0)
+        # 2. Momentum features (6 features)
+        rsi = float(tech_indicators.get('rsi', 50.0))
+        features.extend([
+            rsi / 100.0,
+            1.0 if tech_indicators.get('macdBullish', False) else 0.0,
+            1.0 if tech_indicators.get('macdBearish', False) else 0.0,
+            1.0 if tech_indicators.get('rsiBullishZone', False) else 0.0,
+            1.0 if tech_indicators.get('rsiBearishZone', False) else 0.0,
+            1.0 if tech_indicators.get('rsiRising', False) else 0.0
+        ])
+
+        # 3. Volume features (5 features)
+        volume_ratio = float(tech_indicators.get('volumeRatio', 1.0))
+        features.extend([
+            volume_ratio,
+            1.0 if tech_indicators.get('strongVolume', False) else 0.0,
+            min(volume_ratio / 5.0, 1.0),
+            1.0 if tech_indicators.get('volumeBreakout', False) else 0.0,
+            1.0 if tech_indicators.get('volumeTrendUp', False) else 0.0
+        ])
+
+        # 4. Risk features (4 features)
+        risk_reward = float(tech_indicators.get('riskRewardRatio', 0.0))
+        features.extend([
+            min(risk_reward / 10.0, 1.0),
+            float(tech_indicators.get('volatilityPercent', 0.0)) / 100.0,
+            float(tech_indicators.get('distanceFromSupport', 0.0)) / 100.0,
+            float(tech_indicators.get('distanceFromResistance', 0.0)) / 100.0
+        ])
+
+        # 5. Structure features (4 features)
+        features.extend([
+            1.0 if tech_indicators.get('higherHighs', False) else 0.0,
+            1.0 if tech_indicators.get('lowerLows', False) else 0.0,
+            1.0 if tech_indicators.get('bullishStructure', False) else 0.0,
+            1.0 if tech_indicators.get('bearishStructure', False) else 0.0
+        ])
+
+        # Ensure exactly 25 features for complex format
+        while len(features) < 25:
+            features.append(0.0)
+        features = features[:25]
+
+        # Validate features
+        features = [float(f) if not (np.isnan(f) or np.isinf(f)) else 0.0 for f in features]
+        return np.array(features, dtype=np.float32)
+
+    def create_model(self):
+        """
+        Create neural network model - adaptive based on feature dimension
+        """
+        inputs = keras.Input(shape=(self.feature_dim,), name='technical_features')
+
+        # Adaptive architecture based on feature dimension
+        if self.feature_dim <= 10:
+            # Simpler model for fewer features
+            x = layers.Dense(32, activation='relu', name='dense_1')(inputs)
+            x = layers.Dropout(0.3, name='dropout_1')(x)
+            x = layers.Dense(16, activation='relu', name='dense_2')(x)
+            x = layers.Dropout(0.2, name='dropout_2')(x)
+        else:
+            # More complex model for more features
+            x = layers.Dense(64, activation='relu', name='dense_1')(inputs)
+            x = layers.BatchNormalization(name='bn_1')(x)
+            x = layers.Dropout(0.3, name='dropout_1')(x)
+
+            x = layers.Dense(32, activation='relu', name='dense_2')(x)
+            x = layers.BatchNormalization(name='bn_2')(x)
+            x = layers.Dropout(0.2, name='dropout_2')(x)
+
+            x = layers.Dense(16, activation='relu', name='dense_3')(x)
+            x = layers.Dropout(0.1, name='dropout_3')(x)
+
+        # Output layer - 3 classes
+        outputs = layers.Dense(3, activation='softmax', name='signal_output')(x)
+
+        model = keras.Model(inputs=inputs, outputs=outputs, name='SwingTradingModel')
 
         model.compile(
-            optimizer=optimizer,
-            loss='sparse_categorical_crossentropy',  # For integer labels
+            optimizer=keras.optimizers.Adam(learning_rate=0.001),
+            loss='categorical_crossentropy',
             metrics=['accuracy']
         )
 
         return model
 
-    def calculate_class_weights(self, labels):
-        """Calculate class weights for imbalanced data"""
-        unique_labels, counts = np.unique(labels, return_counts=True)
-        total_samples = len(labels)
+    def train_model(self, features, labels):
+        """
+        Train the model
+        """
+        # Prepare label encoder
+        label_encoder = LabelEncoder()
+        encoded_labels = label_encoder.fit_transform(labels)
 
-        class_weights = {}
-        for label, count in zip(unique_labels, counts):
-            weight = total_samples / (len(unique_labels) * count)
-            class_weights[int(label)] = weight
+        # Ensure we have exactly 3 classes
+        unique_labels = np.unique(encoded_labels)
+        n_classes = len(unique_labels)
 
-        logger.info(f"Class weights: {class_weights}")
-        return class_weights
+        if n_classes < 3:
+            print(f"Warning: Only {n_classes} classes found. Adding dummy samples for missing classes.")
+            # Add dummy samples for missing classes
+            all_classes = ['LOSS', 'NEUTRAL', 'PROFIT']
+            for i, class_name in enumerate(all_classes):
+                if class_name not in label_encoder.classes_:
+                    # Add a dummy feature vector and label
+                    dummy_feature = np.mean(features, axis=0)
+                    features = np.vstack([features, dummy_feature])
+                    labels = np.append(labels, class_name)
 
-    def train_directional_models(self, features, directions, epochs=100):
-        """Train models for directional prediction"""
-        logger.info("=== DIRECTIONAL MODEL TRAINING ===")
+            # Re-encode labels
+            label_encoder = LabelEncoder()
+            encoded_labels = label_encoder.fit_transform(labels)
 
-        # Split data
-        X_train, X_val, y_train, y_val = train_test_split(
-            features, directions, test_size=0.2, random_state=42,
-            stratify=directions if len(np.unique(directions)) > 1 else None
-        )
-
-        logger.info(f"Training set: {X_train.shape}")
-        logger.info(f"Validation set: {X_val.shape}")
-
-        # Log class distribution
-        train_dist = pd.Series(y_train).value_counts().sort_index()
-        val_dist = pd.Series(y_val).value_counts().sort_index()
-        logger.info(f"Train distribution: {dict(train_dist)}")
-        logger.info(f"Val distribution: {dict(val_dist)}")
+        categorical_labels = keras.utils.to_categorical(encoded_labels, num_classes=3)
 
         # Scale features
-        if hasattr(self, '_scaler_fitted'):
-            X_train_scaled = self.scaler.transform(X_train)
-            X_val_scaled = self.scaler.transform(X_val)
-        else:
-            X_train_scaled = self.scaler.fit_transform(X_train)
-            X_val_scaled = self.scaler.transform(X_val)
-            self._scaler_fitted = True
+        scaler = StandardScaler()
+        scaled_features = scaler.fit_transform(features)
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        # Train XGBoost for multi-class
-        logger.info("Training XGBoost for directional prediction...")
-        xgb_clf = xgb.XGBClassifier(
-            n_estimators=300,
-            max_depth=6,
-            learning_rate=0.05,
-            subsample=0.8,
-            colsample_bytree=0.8,
+        # Train/validation split
+        X_train, X_val, y_train, y_val = train_test_split(
+            scaled_features, categorical_labels,
+            test_size=self.validation_split,
             random_state=42,
-            objective='multi:softprob',  # Multi-class
-            num_class=3  # HOLD/LONG/SHORT
+            stratify=encoded_labels
         )
 
-        xgb_clf.fit(X_train_scaled, y_train)
-        self.models[f"xgb_directional_{timestamp}"] = xgb_clf
+        print(f"Training samples: {len(X_train)}, Validation samples: {len(X_val)}")
+        print(f"Feature dimension: {self.feature_dim}")
 
-        # Evaluate XGBoost
-        xgb_pred = xgb_clf.predict(X_val_scaled)
-        xgb_acc = accuracy_score(y_val, xgb_pred)
+        # Create model
+        model = self.create_model()
+        print("Model architecture:")
+        model.summary()
 
-        logger.info(f"XGBoost validation accuracy: {xgb_acc:.4f}")
-        logger.info("XGBoost Classification Report:")
-        logger.info(f"\n{classification_report(y_val, xgb_pred, target_names=['HOLD', 'LONG', 'SHORT'])}")
-
-        # Train Neural Network
-        logger.info("Training Neural Network for directional prediction...")
-        nn_clf = self.create_directional_neural_network(X_train_scaled.shape[1], n_classes=3)
-
-        # Class weights for imbalanced data
-        class_weights = self.calculate_class_weights(y_train)
-
-        # Callbacks
+        # Training callbacks
         callbacks = [
             keras.callbacks.EarlyStopping(
-                patience=15, restore_best_weights=True, monitor='val_loss'
+                monitor='val_loss', patience=8, restore_best_weights=True
             ),
             keras.callbacks.ReduceLROnPlateau(
-                factor=0.5, patience=7, min_lr=1e-7, monitor='val_loss'
+                monitor='val_loss', factor=0.5, patience=4, min_lr=1e-6
             )
         ]
 
-        history = nn_clf.fit(
-            X_train_scaled, y_train,
-            epochs=epochs,
-            batch_size=32,
-            validation_data=(X_val_scaled, y_val),
+        # Train model
+        print("Starting training...")
+        history = model.fit(
+            X_train, y_train,
+            validation_data=(X_val, y_val),
+            epochs=self.epochs,
+            batch_size=min(self.batch_size, len(X_train) // 4),
             callbacks=callbacks,
-            class_weight=class_weights,
             verbose=1
         )
 
-        self.models[f"neural_net_directional_{timestamp}"] = nn_clf
+        # Evaluate model
+        val_loss, val_accuracy = model.evaluate(X_val, y_val, verbose=0)
 
-        # Evaluate Neural Network
-        nn_pred_proba = nn_clf.predict(X_val_scaled, verbose=0)
-        nn_pred = np.argmax(nn_pred_proba, axis=1)
-        nn_acc = accuracy_score(y_val, nn_pred)
+        print(f"\nValidation Results:")
+        print(f"Loss: {val_loss:.4f}")
+        print(f"Accuracy: {val_accuracy:.4f}")
 
-        logger.info(f"Neural Network validation accuracy: {nn_acc:.4f}")
-        logger.info("Neural Network Classification Report:")
-        logger.info(f"\n{classification_report(y_val, nn_pred, target_names=['HOLD', 'LONG', 'SHORT'])}")
+        # Classification report
+        y_pred = model.predict(X_val)
+        y_pred_classes = np.argmax(y_pred, axis=1)
+        y_val_classes = np.argmax(y_val, axis=1)
 
-        # Confusion matrices
-        logger.info("XGBoost Confusion Matrix:")
-        logger.info(f"\n{confusion_matrix(y_val, xgb_pred)}")
-        logger.info("Neural Network Confusion Matrix:")
-        logger.info(f"\n{confusion_matrix(y_val, nn_pred)}")
+        class_names = label_encoder.classes_
+        print(f"\nClassification Report:")
+        print(classification_report(y_val_classes, y_pred_classes, target_names=class_names, zero_division=0))
 
-        # Results
-        results = {
-            'xgboost': {
-                'accuracy': xgb_acc,
-                'predictions': xgb_pred,
-                'confusion_matrix': confusion_matrix(y_val, xgb_pred).tolist()
-            },
-            'neural_net': {
-                'accuracy': nn_acc,
-                'predictions': nn_pred,
-                'probabilities': nn_pred_proba,
-                'confusion_matrix': confusion_matrix(y_val, nn_pred).tolist()
-            },
-            'validation_labels': y_val
+        # Save model and components
+        model.save(self.model_path)
+        joblib.dump(scaler, self.scaler_path)
+        joblib.dump(label_encoder, self.label_encoder_path)
+
+        # Save metadata
+        metadata = {
+            'model_version': '1.0-first-run-compatible',
+            'training_date': datetime.now().isoformat(),
+            'feature_dimension': self.feature_dim,
+            'num_classes': 3,
+            'class_names': class_names.tolist(),
+            'training_samples': len(X_train),
+            'validation_samples': len(X_val),
+            'val_accuracy': float(val_accuracy),
+            'epochs_trained': len(history.history['loss'])
         }
 
-        return results
+        with open(self.metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=2)
 
-    def save_directional_models(self):
-        """Save directional models"""
-        logger.info("Saving directional models...")
+        print(f"\nModel saved to: {self.model_path}")
+        print(f"Scaler saved to: {self.scaler_path}")
+        print(f"Label encoder saved to: {self.label_encoder_path}")
+        print(f"Metadata saved to: {self.metadata_path}")
 
-        for name, model in self.models.items():
-            if "xgb" in name:
-                # Save XGBoost
-                model_path = self.model_dir / f"{name}.pkl"
-                with open(model_path, "wb") as f:
-                    pickle.dump(model, f)
-
-                # Current version
-                current_path = self.model_dir / "xgb_directional.pkl"
-                with open(current_path, "wb") as f:
-                    pickle.dump(model, f)
-
-            elif "neural_net" in name:
-                # Save Neural Network
-                model_path = self.model_dir / f"{name}.keras"
-                model.save(model_path)
-
-                # Current version
-                current_path = self.model_dir / "neural_net_directional.keras"
-                model.save(current_path)
-
-        # Save preprocessing components
-        with open(self.model_dir / "directional_scaler.pkl", "wb") as f:
-            pickle.dump(self.scaler, f)
-
-        if self.feature_encoder:
-            with open(self.model_dir / "directional_feature_encoder.pkl", "wb") as f:
-                pickle.dump(self.feature_encoder, f)
-
-        # Save class mapping info
-        class_info = {
-            'class_mapping': {0: 'HOLD', 1: 'LONG', 2: 'SHORT'},
-            'prediction_mode': self.prediction_mode,
-            'model_version': datetime.now().isoformat()
-        }
-
-        with open(self.model_dir / "directional_model_info.json", "w") as f:
-            json.dump(class_info, f, indent=2)
-
-        logger.info("Directional models saved successfully")
+        return model, history, scaler, label_encoder
 
 
 def main():
-    logger.info("=== DIRECTIONAL TRADING MODEL TRAINING ===")
-
-    # Javított argumentum kezelés
+    """
+    Main training function
+    """
     if len(sys.argv) < 2:
-        print("Használat:")
-        print("  python directional_model.py <fájl_minta> [epoch_szám]")
-        print("  python directional_model.py 50  # 50 epoch alapértelmezett fájl mintával")
-        print("  python directional_model.py 'training_data_*.json' 100")
-        print()
+        print("Usage: python train_model.py <training_data_pattern> [epochs]")
+        print("Example: python train_model.py training_data_*.json 50")
+        sys.exit(1)
 
-        # Ha csak egy szám van megadva, azt epoch-ként kezeljük
-        # és alapértelmezett fájl mintát használunk
-        if len(sys.argv) == 2:
-            try:
-                epochs = int(sys.argv[1])
-                training_pattern = "training_data_*.json"  # alapértelmezett
-                print(f"Epoch szám megadva: {epochs}")
-                print(f"Alapértelmezett fájl minta: {training_pattern}")
-            except ValueError:
-                print("Hibás argumentum!")
-                sys.exit(1)
-        else:
-            # Ha nincs argumentum, alapértékek
-            training_pattern = "training_data_*.json"
-            epochs = 100
-            print(f"Alapértelmezett beállítások: minta='{training_pattern}', epochs={epochs}")
-    else:
-        # Intelligens argumentum felismerés
-        first_arg = sys.argv[1]
+    training_pattern = sys.argv[1]
+    epochs = int(sys.argv[2]) if len(sys.argv) > 2 else 50
 
-        # Ha az első argumentum szám, akkor epoch
-        try:
-            epochs = int(first_arg)
-            training_pattern = "training_data_*.json"  # alapértelmezett minta
-            print(f"Epoch szám: {epochs}, Alapértelmezett minta: {training_pattern}")
-        except ValueError:
-            # Ha nem szám, akkor fájl minta
-            training_pattern = first_arg
-            epochs = int(sys.argv[2]) if len(sys.argv) > 2 else 100
-            print(f"Fájl minta: {training_pattern}, Epochs: {epochs}")
+    print(f"Training ML model with pattern: {training_pattern}")
+    print(f"Epochs: {epochs}")
 
     try:
-        # Initialize directional trainer
-        trainer = DirectionalTradingModelTrainer(
-            keep_latest_models=5,
-            prediction_mode="directional"
-        )
+        # Initialize trainer
+        trainer = TradingModelTrainer()
+        trainer.epochs = epochs
 
-        # Ellenőrizzük hogy vannak-e training fájlok
-        try:
-            samples = trainer.load_training_data(training_pattern)
-        except FileNotFoundError as e:
-            logger.error(f"Nincs training adat: {e}")
+        # Load training data
+        samples = trainer.load_training_data(training_pattern)
 
-            # Segítség a felhasználónak
-            print("\n=== HIBAELHÁRÍTÁS ===")
-            print("1. Ellenőrizd hogy léteznek-e training fájlok:")
-            print(f"   Könyvtár: {trainer.training_dir}")
-            print(f"   Minta: {training_pattern}")
-            print()
-            print("2. Ha nincsenek fájlok, generálj training adatot:")
-            print("   - Futtasd a PowerShell script-et:")
-            print("     .\\src\\scripts\\Train-Pipeline.ps1 -SymbolsLimit 50 -MonthsBack 6")
-            print("   - Vagy generálj manuálisan training adatot")
-            print()
-            print("3. Fájl keresési helyek:")
-            for path in trainer.base_dir.parent.glob("**/training_data_*.json"):
-                print(f"   Találat: {path}")
+        if len(samples) < 50:
+            print(f"Warning: Only {len(samples)} training samples. Results may be poor.")
 
+        # Prepare features and labels
+        features, labels, sample_info = trainer.prepare_features_and_labels(samples)
+
+        if len(features) == 0:
+            print("ERROR: No valid samples found!")
             sys.exit(1)
 
-        # Load and process data
-        features, directions, feature_names = trainer.debug_and_prepare_data(samples)
+        print(f"Label distribution: {dict(zip(*np.unique(labels, return_counts=True)))}")
 
-        # Train directional models
-        results = trainer.train_directional_models(features, directions, epochs)
+        # Train model
+        model, history, scaler, label_encoder = trainer.train_model(features, labels)
 
-        # Save everything
-        trainer.save_directional_models()
-
-        logger.info("=== DIRECTIONAL TRAINING COMPLETED ===")
-        logger.info(f"XGBoost Accuracy: {results['xgboost']['accuracy']:.4f}")
-        logger.info(f"Neural Net Accuracy: {results['neural_net']['accuracy']:.4f}")
-
-        return results
+        print("Training completed successfully!")
 
     except Exception as e:
-        logger.error(f"Directional training failed: {e}")
+        print(f"Training failed: {e}")
         import traceback
         traceback.print_exc()
-
-        print("\n=== TOVÁBBI HIBAELHÁRÍTÁS ===")
-        print("1. Ellenőrizd a TensorFlow telepítést:")
-        print("   pip install tensorflow")
-        print()
-        print("2. Ellenőrizd a függőségeket:")
-        print("   pip install -r requirements.txt")
-        print()
-        print("3. Ellenőrizd az adatok formátumát:")
-        print("   Nézd meg a training_data_*.json fájlokat")
-
         sys.exit(1)
+
+
 if __name__ == "__main__":
     main()

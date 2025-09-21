@@ -349,7 +349,7 @@ public class SwingAlgoService {
                                                        List<Double> lows15m, double currentPrice) {
 
         TechnicalIndicators indicators = new TechnicalIndicators();
-
+        indicators.setCurrentPrice(currentPrice);
         // === TREND INDICATORS ===
         indicators.setEma20_4h(indicatorUtil.EMA(closes4h, 20));
         indicators.setEma50_4h(indicatorUtil.EMA(closes4h, 50));
