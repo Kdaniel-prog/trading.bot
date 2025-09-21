@@ -457,16 +457,48 @@ class DirectionalTradingModelTrainer:
 
         logger.info("Directional models saved successfully")
 
+
 def main():
     logger.info("=== DIRECTIONAL TRADING MODEL TRAINING ===")
 
+    # Javított argumentum kezelés
     if len(sys.argv) < 2:
-        print("Usage: python directional_model.py <training_pattern> [epochs]")
-        print("Example: python directional_model.py 'training_data_*.json' 100")
-        sys.exit(1)
+        print("Használat:")
+        print("  python directional_model.py <fájl_minta> [epoch_szám]")
+        print("  python directional_model.py 50  # 50 epoch alapértelmezett fájl mintával")
+        print("  python directional_model.py 'training_data_*.json' 100")
+        print()
 
-    training_pattern = sys.argv[1]
-    epochs = int(sys.argv[2]) if len(sys.argv) > 2 else 100
+        # Ha csak egy szám van megadva, azt epoch-ként kezeljük
+        # és alapértelmezett fájl mintát használunk
+        if len(sys.argv) == 2:
+            try:
+                epochs = int(sys.argv[1])
+                training_pattern = "training_data_*.json"  # alapértelmezett
+                print(f"Epoch szám megadva: {epochs}")
+                print(f"Alapértelmezett fájl minta: {training_pattern}")
+            except ValueError:
+                print("Hibás argumentum!")
+                sys.exit(1)
+        else:
+            # Ha nincs argumentum, alapértékek
+            training_pattern = "training_data_*.json"
+            epochs = 100
+            print(f"Alapértelmezett beállítások: minta='{training_pattern}', epochs={epochs}")
+    else:
+        # Intelligens argumentum felismerés
+        first_arg = sys.argv[1]
+
+        # Ha az első argumentum szám, akkor epoch
+        try:
+            epochs = int(first_arg)
+            training_pattern = "training_data_*.json"  # alapértelmezett minta
+            print(f"Epoch szám: {epochs}, Alapértelmezett minta: {training_pattern}")
+        except ValueError:
+            # Ha nem szám, akkor fájl minta
+            training_pattern = first_arg
+            epochs = int(sys.argv[2]) if len(sys.argv) > 2 else 100
+            print(f"Fájl minta: {training_pattern}, Epochs: {epochs}")
 
     try:
         # Initialize directional trainer
@@ -475,8 +507,30 @@ def main():
             prediction_mode="directional"
         )
 
+        # Ellenőrizzük hogy vannak-e training fájlok
+        try:
+            samples = trainer.load_training_data(training_pattern)
+        except FileNotFoundError as e:
+            logger.error(f"Nincs training adat: {e}")
+
+            # Segítség a felhasználónak
+            print("\n=== HIBAELHÁRÍTÁS ===")
+            print("1. Ellenőrizd hogy léteznek-e training fájlok:")
+            print(f"   Könyvtár: {trainer.training_dir}")
+            print(f"   Minta: {training_pattern}")
+            print()
+            print("2. Ha nincsenek fájlok, generálj training adatot:")
+            print("   - Futtasd a PowerShell script-et:")
+            print("     .\\src\\scripts\\Train-Pipeline.ps1 -SymbolsLimit 50 -MonthsBack 6")
+            print("   - Vagy generálj manuálisan training adatot")
+            print()
+            print("3. Fájl keresési helyek:")
+            for path in trainer.base_dir.parent.glob("**/training_data_*.json"):
+                print(f"   Találat: {path}")
+
+            sys.exit(1)
+
         # Load and process data
-        samples = trainer.load_training_data(training_pattern)
         features, directions, feature_names = trainer.debug_and_prepare_data(samples)
 
         # Train directional models
@@ -495,7 +549,17 @@ def main():
         logger.error(f"Directional training failed: {e}")
         import traceback
         traceback.print_exc()
-        sys.exit(1)
 
+        print("\n=== TOVÁBBI HIBAELHÁRÍTÁS ===")
+        print("1. Ellenőrizd a TensorFlow telepítést:")
+        print("   pip install tensorflow")
+        print()
+        print("2. Ellenőrizd a függőségeket:")
+        print("   pip install -r requirements.txt")
+        print()
+        print("3. Ellenőrizd az adatok formátumát:")
+        print("   Nézd meg a training_data_*.json fájlokat")
+
+        sys.exit(1)
 if __name__ == "__main__":
     main()

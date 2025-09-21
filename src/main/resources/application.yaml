@@ -55,11 +55,11 @@ backtest:
 
   directional:
     min:
-      confidence: 0.65
-      score: 5.0
+      confidence: 0.3
+      score: 1.0
     hold:
       exit:
-        confidence: 0.8
+        confidence: 0.6
     risk:
       stop:
         loss:
