@@ -14,6 +14,7 @@ import java.util.Map;
 @AllArgsConstructor
 public class MLPredictionRequest {
     private String symbol;
+    private Map<String, Object> mlData;
     private List<List<Object>> fourHourKlines;
     private List<List<Object>> dailyKlines;
     private List<List<Object>> hourlyKlines;

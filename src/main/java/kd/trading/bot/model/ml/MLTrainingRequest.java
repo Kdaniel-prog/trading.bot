@@ -14,5 +14,4 @@ public class MLTrainingRequest {
     private LocalDateTime endDate;
     private String modelName;
     private boolean runBacktests = true;
-
 }

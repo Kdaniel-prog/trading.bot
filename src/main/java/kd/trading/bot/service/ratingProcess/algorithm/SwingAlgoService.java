@@ -1045,7 +1045,7 @@ public class SwingAlgoService {
     public CoinAnalysis analyzeHistoricalCoin(String symbol, double lastPrice,
                                               List<List<Object>> fourHourKlines,
                                               List<List<Object>> dailyKlines,
-                                              List<List<Object>> hourlyKlines) {
+                                              List<List<Object>> hourlyKlines, List<List<Object>> thirtyMinKlines) {
         try {
             if (fourHourKlines.size() < 100 || dailyKlines.size() < 50) {
                 return createNoTradeAnalysis(symbol, lastPrice, "Insufficient historical data");
