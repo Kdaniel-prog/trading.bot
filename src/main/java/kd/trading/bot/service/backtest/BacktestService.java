@@ -279,7 +279,7 @@ public class BacktestService {
                         .collect(Collectors.toList());
                 List<Double> volumes = h4Data.stream()
                         .map(HistoricalCandle::getVolume)
-                        .collect(Collectors.toList());
+                        .toList();
 
                 // Use IndicatorUtil for calculations
                 double rsi = indicatorUtil.RSI(closes, 14);
@@ -420,7 +420,7 @@ public class BacktestService {
                 TrainingDataPoint sample = validData.get(0);
                 log.info("Sample: symbol={}, outcome={}, indicators={}",
                         sample.getSymbol(), sample.getActualOutcome(),
-                        sample.getTechnicalIndicators().keySet().size());
+                        sample.getTechnicalIndicators().size());
             }
 
         } catch (Exception e) {
@@ -465,7 +465,7 @@ public class BacktestService {
 
         List<HistoricalCandle> historicalOnly = timeframeData.stream()
                 .filter(candle -> candle.getTimestamp().isBefore(currentTime))
-                .collect(Collectors.toList());
+                .toList();
 
         if (historicalOnly.isEmpty()) {
             return Collections.emptyList();
