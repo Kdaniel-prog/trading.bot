@@ -60,6 +60,7 @@ public class MarketDataPipelineService {
             if (athFiltered.isEmpty()) return;
             log.info("check trade service 3: athFilter");
 
+            /**
             // 4. analysis
             List<CoinAnalysis> analyzed = athFiltered.stream()
                     .map(ticker -> algorithmService.analyzeCoin(ticker.getSymbol(), ticker.getLastPrice()) )
@@ -73,7 +74,7 @@ public class MarketDataPipelineService {
 
             // 5. ranking
             latestResult = rankingService.rank(analyses);
-
+            */
             // logoljuk a top és bottom coinokat
             logTopCoins();
 
