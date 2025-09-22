@@ -141,12 +141,15 @@ else {
 }
 
 # 5. Test Model
+# 5. Test Model
 Write-Host "`n--- Model Testing ---" -ForegroundColor Yellow
 try {
     $symbolsAvailable = Invoke-RestMethod -Uri "http://localhost:8080/api/backtest/symbols" -TimeoutSec 10
     $testSymbol = $symbolsAvailable[0]
     Write-Host "Test szimbolum: $testSymbol" -ForegroundColor Cyan
+
     $testResult = Invoke-RestMethod -Uri "http://localhost:8080/api/backtest/quick/$testSymbol?daysBack=30" -TimeoutSec 30
+
     if ($testResult.success) {
         Write-Host "Test eredmeny:" -ForegroundColor Green
         Write-Host "  Return: $($testResult.totalReturnPercent.ToString('F2'))%" -ForegroundColor White
@@ -159,5 +162,4 @@ try {
 catch {
     Write-Host "Model test hiba: $($_.Exception.Message)" -ForegroundColor Red
 }
-
 Write-Host "`n--- Pipeline Kesz ---" -ForegroundColor Cyan

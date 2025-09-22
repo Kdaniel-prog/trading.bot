@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -78,7 +79,32 @@ public class MLController {
 
             // 2. Export training data from backtests
             log.info("Exporting training data from backtest results...");
-            List<BacktestResult> backtestResults = backtestService.getAllBacktestResults();
+            List<BacktestResult> backtestResults = new ArrayList<>();
+
+            for (String symbol : request.getSymbols()) {
+                try {
+                    BacktestResult backtestResult = backtestService.runBacktest(
+                            symbol,
+                            request.getTimeframe(),
+                            request.getStartDate(),
+                            request.getEndDate()
+                    );
+
+                    if (backtestResult != null && backtestResult.isSuccess()) {
+                        successfulBacktests++;
+                        backtestResults.add(backtestResult); // <<-- itt gyűjtöd
+                        log.info("Backtest completed for {}: {} trades, {}% profit",
+                                symbol, backtestResult.getTotalTrades(),
+                                backtestResult.getTotalReturnPercent());
+                    } else {
+                        log.warn("Backtest failed for {}: {}", symbol,
+                                backtestResult != null ? backtestResult.getErrorMessage() : "null result");
+                    }
+
+                } catch (Exception e) {
+                    log.error("Backtest error for {}: {}", symbol, e.getMessage());
+                }
+            }
 
             if (backtestResults.isEmpty()) {
                 response.put("success", false);
@@ -243,86 +269,5 @@ public class MLController {
         }
     }
 
-    /**
-     * Health check for ML service
-     * GET /api/ml/health
-     */
-    @GetMapping("/health")
-    public ResponseEntity<Map<String, Object>> healthCheck() {
-        Map<String, Object> response = new HashMap<>();
 
-        try {
-            // Check if Python ML service is accessible
-            boolean pythonReady = pythonMLService.isModelReady("test");
-
-            response.put("success", true);
-            response.put("pythonMLService", "available");
-            response.put("backtestHistorySize", backtestService.getBacktestHistorySize());
-            response.put("message", "ML service is healthy");
-
-            return ResponseEntity.ok(response);
-
-        } catch (Exception e) {
-            response.put("success", false);
-            response.put("pythonMLService", "error");
-            response.put("message", "ML service error: " + e.getMessage());
-
-            return ResponseEntity.status(503).body(response);
-        }
-    }
-
-    /**
-     * Get backtest history for inspection
-     * GET /api/ml/backtest-history
-     */
-    @GetMapping("/backtest-history")
-    public ResponseEntity<Map<String, Object>> getBacktestHistory(
-            @RequestParam(required = false) String symbol,
-            @RequestParam(required = false) String timeframe) {
-
-        try {
-            List<BacktestResult> results = backtestService.getBacktestResults(symbol, timeframe);
-
-            Map<String, Object> response = new HashMap<>();
-            response.put("success", true);
-            response.put("results", results);
-            response.put("totalResults", results.size());
-
-            if (symbol != null) response.put("filteredBySymbol", symbol);
-            if (timeframe != null) response.put("filteredByTimeframe", timeframe);
-
-            return ResponseEntity.ok(response);
-
-        } catch (Exception e) {
-            log.error("Error getting backtest history: {}", e.getMessage(), e);
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("success", false);
-            errorResponse.put("message", "Error retrieving backtest history: " + e.getMessage());
-            return ResponseEntity.internalServerError().body(errorResponse);
-        }
-    }
-
-    /**
-     * Clear backtest history (for testing)
-     * DELETE /api/ml/backtest-history
-     */
-    @DeleteMapping("/backtest-history")
-    public ResponseEntity<Map<String, Object>> clearBacktestHistory() {
-        try {
-            backtestService.clearBacktestHistory();
-
-            Map<String, Object> response = new HashMap<>();
-            response.put("success", true);
-            response.put("message", "Backtest history cleared");
-
-            return ResponseEntity.ok(response);
-
-        } catch (Exception e) {
-            log.error("Error clearing backtest history: {}", e.getMessage(), e);
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("success", false);
-            errorResponse.put("message", "Error clearing backtest history: " + e.getMessage());
-            return ResponseEntity.internalServerError().body(errorResponse);
-        }
-    }
 }

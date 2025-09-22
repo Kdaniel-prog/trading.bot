@@ -2,6 +2,7 @@ package kd.trading.bot.model.ml;
 
 import lombok.*;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Data
@@ -9,8 +10,8 @@ import java.util.List;
 public class MLTrainingRequest {
     private List<String> symbols;
     private String timeframe;
-    private String startDate;
-    private String endDate;
+    private LocalDateTime startDate;
+    private LocalDateTime endDate;
     private String modelName;
     private boolean runBacktests = true;
 
