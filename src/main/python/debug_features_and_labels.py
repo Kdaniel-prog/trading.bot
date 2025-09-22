@@ -111,8 +111,16 @@ def prepare_from_files(file_paths, max_samples=None):
             print(f"Error loading {fp}: {e}")
             continue
 
-        if isinstance(data, dict) and 'samples' in data:
-            samples = data['samples']
+        # Handle different JSON structures
+        if isinstance(data, dict):
+            if 'samples' in data:
+                samples = data['samples']
+            elif 'training_data' in data:
+                samples = data['training_data']
+            else:
+                # Try to find the first list-valued field
+                lists = [v for v in data.values() if isinstance(v, list)]
+                samples = lists[0] if lists else []
         elif isinstance(data, list):
             samples = data
         else:
@@ -121,20 +129,20 @@ def prepare_from_files(file_paths, max_samples=None):
 
         for sample in samples:
             if max_samples and count >= max_samples:
-                return np.vstack(features) if features else np.empty((0,25)), np.array(labels)
+                return np.vstack(features) if features else np.empty((0, 25)), np.array(labels)
 
-            # complex format?
-            if 'technicalIndicators' in sample:
-                tech = sample.get('technicalIndicators', {})
+            # Complex format: check for swingalgo_features or technicalIndicators
+            if 'swingalgo_features' in sample or 'technicalIndicators' in sample or 'actual_outcome' in sample:
+                tech = sample.get('swingalgo_features', sample.get('technicalIndicators', sample))
                 fv = extract_feature_vector(tech, sample)
-                outcome = sample.get('actualOutcome', sample.get('outcome', 'NO_TRADE'))
+                outcome = sample.get('actual_outcome', sample.get('actualOutcome', 'NO_TRADE'))
                 if outcome == 'NO_TRADE':
                     continue
                 features.append(fv)
                 labels.append(outcome)
                 count += 1
 
-            # fallback: simple format
+            # Fallback: simple format
             elif 'direction' in sample or 'pnl_percent' in sample:
                 try:
                     pnl_percent = float(sample.get('pnl_percent', 0.0))
@@ -173,7 +181,7 @@ def prepare_from_files(file_paths, max_samples=None):
                     continue
 
     if not features:
-        return np.empty((0,25)), np.array([])
+        return np.empty((0, 25)), np.array([])
 
     return np.vstack(features), np.array(labels)
 

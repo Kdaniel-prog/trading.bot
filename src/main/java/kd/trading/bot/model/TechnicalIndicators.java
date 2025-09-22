@@ -45,7 +45,7 @@ public class TechnicalIndicators {
 
     // === MOMENTUM INDICATORS ===
     @JsonProperty("rsi")
-    private double rsi;
+    private Double rsi;
 
     @JsonProperty("macdLine")
     private double macdLine;
@@ -54,7 +54,7 @@ public class TechnicalIndicators {
     private double macdSignal;
 
     @JsonProperty("macdHistogram")
-    private double macdHistogram;
+    private Double macdHistogram;
 
     @JsonProperty("macdBullish")
     private boolean macdBullish;
@@ -88,7 +88,7 @@ public class TechnicalIndicators {
     private double averageVolume50;
 
     @JsonProperty("volumeRatio")
-    private double volumeRatio;
+    private Double volumeRatio;
 
     @JsonProperty("strongVolume")
     private boolean strongVolume;
@@ -104,7 +104,7 @@ public class TechnicalIndicators {
     private double atr;
 
     @JsonProperty("volatilityPercent")
-    private double volatilityPercent;
+    private Double volatilityPercent;
 
     @JsonProperty("shortTermVolatility")
     private double shortTermVolatility;
@@ -122,7 +122,7 @@ public class TechnicalIndicators {
     private double distanceFromResistance;
 
     @JsonProperty("riskRewardRatio")
-    private double riskRewardRatio;
+    private Double riskRewardRatio;
 
     // === MARKET STRUCTURE INDICATORS ===
     @JsonProperty("higherHighs")

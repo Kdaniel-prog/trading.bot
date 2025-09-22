@@ -154,11 +154,35 @@ class TradingModelTrainer:
     def detect_data_format(self, sample: dict) -> str:
         if not isinstance(sample, dict):
             return "unknown"
-        if "technicalIndicators" in sample or any(k.startswith("analysis_") for k in sample.keys()):
+        # Check for complex format (technical indicators or swingalgo_features)
+        if "technicalIndicators" in sample or "swingalgo_features" in sample or "actual_outcome" in sample or any(
+                k.startswith("analysis_") for k in sample.keys()):
             return "complex"
-        if "direction" in sample or ("pnl_percent" in sample) or ("actualPnl" in sample):
+        # Check for simple format
+        if "direction" in sample or "pnl_percent" in sample or "actualPnl" in sample:
             return "simple"
         return "unknown"
+
+    def _prepare_complex_features(self, samples: List[dict]) -> Tuple[np.ndarray, np.ndarray, None]:
+        features, labels = [], []
+        for sample in samples:
+            try:
+                tech = sample.get("swingalgo_features", sample.get("technicalIndicators", sample))
+                feature_vector = self.extract_feature_vector(tech, sample)  # Only 2 args: tech, sample
+                trade_outcome = sample.get("actual_outcome") or sample.get("actualOutcome", "NO_TRADE")
+                if trade_outcome in (None, "NO_TRADE"):
+                    continue
+                features.append(feature_vector)
+                labels.append(trade_outcome)
+            except Exception as exc:
+                logging.getLogger().warning(f"Error processing complex sample: {exc}")
+                continue
+        if not features:
+            return np.zeros((0, self.feature_dim), dtype=np.float32), np.array([]), None
+        features = np.array(features, dtype=np.float32)
+        labels = np.array(labels)
+        logging.getLogger().info(f"Prepared {len(features)} complex samples with {features.shape[1]} features")
+        return features, labels, None
 
     def prepare_features_and_labels(self, samples: List[dict]) -> Tuple[np.ndarray, np.ndarray, Optional[List[str]]]:
         if not samples:
@@ -173,33 +197,6 @@ class TradingModelTrainer:
             return self._prepare_simple_features(samples)
         else:
             raise ValueError("Unknown data format; can't prepare features")
-
-    def _prepare_complex_features(self, samples: List[dict]) -> Tuple[np.ndarray, np.ndarray, None]:
-        features, labels = [], []
-        for sample in samples:
-            try:
-                tech = sample.get("technicalIndicators", {})
-                feature_vector = self.extract_feature_vector(tech, sample)
-                trade_outcome = sample.get("actualOutcome") or sample.get("actualOutcome", "NO_TRADE")
-
-                # Skip pure NO_TRADE examples by default (configurable as needed)
-                if trade_outcome in (None, "NO_TRADE"):
-                    continue
-
-                features.append(feature_vector)
-                labels.append(trade_outcome)
-            except Exception as exc:
-                logging.getLogger().warning(f"Error processing complex sample: {exc}")
-                continue
-
-        if not features:
-            return np.zeros((0, self.feature_dim), dtype=np.float32), np.array([]), None
-
-        features = np.array(features, dtype=np.float32)
-        labels = np.array(labels)
-
-        logging.getLogger().info(f"Prepared {len(features)} complex samples with {features.shape[1]} features")
-        return features, labels, None
 
     def _prepare_simple_features(self, samples: List[dict]) -> Tuple[np.ndarray, np.ndarray, None]:
         features, labels = [], []
@@ -251,66 +248,41 @@ class TradingModelTrainer:
         logging.getLogger().info(f"Prepared {len(features)} simple samples with {features.shape[1]} features")
         return features, labels, None
 
-    def extract_feature_vector(self, tech_indicators: dict, sample: dict) -> np.ndarray:
+    def extract_feature_vector(self, tech_indicators: dict, sample: dict) -> np.ndarray:  # For train_model.py
         features = []
-        current_price = sample.get("currentPrice") or tech_indicators.get("current_price") or 1.0
-        try:
-            current_price = float(current_price)
-        except Exception:
-            current_price = 1.0
-        if current_price <= 0:
+        current_price = sample.get('currentPrice', tech_indicators.get('currentPrice', sample.get('price', 1.0)))
+        if current_price is None or current_price <= 0:
             current_price = 1.0
 
-        # Basic trend & EMAs
+        ema20 = float(tech_indicators.get('ema20_4h', current_price))
+        ema50 = float(tech_indicators.get('ema50_4h', current_price))
         features.extend([
-            1.0 if tech_indicators.get("primaryTrend") == "BULLISH" else (-1.0 if tech_indicators.get("primaryTrend") == "BEARISH" else 0.0),
-            1.0 if tech_indicators.get("shortTermTrend") == "BULLISH" else (-1.0 if tech_indicators.get("shortTermTrend") == "BEARISH" else 0.0),
-            1.0 if tech_indicators.get("trendAlignment", False) else 0.0,
-            float(tech_indicators.get("trendStrength", 0.0)),
-            float(tech_indicators.get("ema20_4h", tech_indicators.get("ema20", current_price))) / current_price,
-            float(tech_indicators.get("ema50_4h", tech_indicators.get("ema50", current_price))) / current_price,
+            1.0 if tech_indicators.get('primaryTrend') == 'BULLISH' else (
+                -1.0 if tech_indicators.get('primaryTrend') == 'BEARISH' else 0.0),  # f0
+            1.0 if tech_indicators.get('shortTermTrend') == 'BULLISH' else (
+                -1.0 if tech_indicators.get('shortTermTrend') == 'BEARISH' else 0.0),  # f1
+            1.0 if tech_indicators.get('trendAlignment', False) else 0.0,  # f2
+            float(tech_indicators.get('trendStrength', 0.0)),  # f3
+            ema20 / current_price,  # f4
+            ema50 / current_price,  # f5
+            float(tech_indicators.get('rsi', 50.0)) / 100.0,  # f6
+            1.0 if tech_indicators.get('macdBullish', False) else 0.0,  # f7
+            1.0 if tech_indicators.get('macdBearish', False) else 0.0,  # f8
+            float(tech_indicators.get('volumeRatio', 1.0)),  # f12
+            1.0 if tech_indicators.get('strongVolume', False) else 0.0,  # f13
+            min(float(tech_indicators.get('volumeRatio', 1.0)) / 5.0, 1.0),  # f14
+            min(float(tech_indicators.get('riskRewardRatio', 0.0)) / 10.0, 1.0),  # f17
+            float(tech_indicators.get('volatilityPercent', 0.0)) / 100.0,  # f18
+            1.0 if tech_indicators.get('bearishStructure', False) else 0.0,  # f23
+            ema20 / ema50 if ema50 != 0 else 1.0,  # New: EMA ratio
+            float(tech_indicators.get('rsi', 50.0)) * float(tech_indicators.get('trendStrength', 0.0)) / 100.0,
+            # New: RSI * trendStrength
         ])
 
-        rsi = float(tech_indicators.get("rsi", tech_indicators.get("analysis_rsi", 50.0)))
-        features.extend([
-            rsi / 100.0,
-            1.0 if tech_indicators.get("macdBullish", tech_indicators.get("analysis_bullish_structure", False)) else 0.0,
-            1.0 if tech_indicators.get("macdBearish", False) else 0.0,
-            1.0 if tech_indicators.get("rsiBullishZone", False) else 0.0,
-            1.0 if tech_indicators.get("rsiBearishZone", False) else 0.0,
-            1.0 if tech_indicators.get("rsiRising", False) else 0.0,
-        ])
-
-        volume_ratio = float(tech_indicators.get("volumeRatio", tech_indicators.get("volume_ratio", 1.0)))
-        features.extend([
-            volume_ratio,
-            1.0 if tech_indicators.get("strongVolume", False) or tech_indicators.get("high_volume", False) else 0.0,
-            min(volume_ratio / 5.0, 1.0),
-            1.0 if tech_indicators.get("volumeBreakout", False) else 0.0,
-            1.0 if tech_indicators.get("volumeTrendUp", False) else 0.0,
-        ])
-
-        risk_reward = float(tech_indicators.get("riskRewardRatio", tech_indicators.get("risk_reward", 0.0)))
-        features.extend([
-            min(risk_reward / 10.0, 1.0),
-            float(tech_indicators.get("volatility_percent", tech_indicators.get("volatilityPercent", 0.0))) / 100.0,
-            float(tech_indicators.get("distanceFromSupport", 0.0)) / 100.0,
-            float(tech_indicators.get("distanceFromResistance", 0.0)) / 100.0,
-        ])
-
-        features.extend([
-            1.0 if tech_indicators.get("higherHighs", False) else 0.0,
-            1.0 if tech_indicators.get("lowerLows", False) else 0.0,
-            1.0 if tech_indicators.get("bullishStructure", tech_indicators.get("analysis_bullish_structure", False)) else 0.0,
-            1.0 if tech_indicators.get("bearishStructure", tech_indicators.get("analysis_bearish_structure", False)) else 0.0,
-        ])
-
-        # pad/truncate to expected feature dimension
-        while len(features) < DEFAULT_FEATURE_DIM:
+        feature_dim = 17  # Updated for new features
+        while len(features) < feature_dim:
             features.append(0.0)
-        features = features[:DEFAULT_FEATURE_DIM]
-
-        # sanitize
+        features = features[:feature_dim]
         features = [float(f) if not (np.isnan(f) or np.isinf(f)) else 0.0 for f in features]
         return np.array(features, dtype=np.float32)
 
