@@ -6,6 +6,35 @@ spring:
 training:
   data:
     directory: src/main/resources/data/training
+    min_samples_per_outcome: 50
+    balance_strategy: "oversample_minority"
+    synthetic_samples_ratio: 0.25
+    exclude_outcomes: [ "HOLDING"]
+    quality_filters:
+      min_candles_lookback: 50  # Minimum historical data required
+      max_missing_indicators: 3  # Maximum missing technical indicators allowed
+      min_pnl_range: -10.0  # Minimum PnL for inclusion (filter extreme outliers)
+      max_pnl_range: 20.0   # Maximum PnL for inclusion
+    features:
+    technical_indicators:
+      - rsi
+      - ema20
+      - ema50
+      - volumeRatio
+      - macdLine
+      - atr
+      - currentPrice
+
+    engineered_features:
+      - rsi_momentum
+      - price_volatility
+      - trend_strength
+      - risk_reward_ratio
+      - market_state_composite
+
+  categorical_features:
+    - timeframe
+    - symbol_category  # e.g., BTC_pairs, ETH_pairs, etc.
   auto:
     generate: false  # Auto-generate training data from backtests
   batch:
@@ -13,6 +42,66 @@ training:
   epochs: 50
   validation:
     split: 0.2
+  model:
+    architecture: "improved_neural_network"
+    layers:
+      - type: "dense"
+        units: 256
+        activation: "swish"
+        dropout: 0.3
+        batch_norm: true
+
+      - type: "dense"
+        units: 128
+        activation: "swish"
+        dropout: 0.4
+        batch_norm: true
+
+      - type: "attention"
+        units: 64
+
+      - type: "dense"
+        units: 64
+        activation: "swish"
+        dropout: 0.3
+
+      - type: "output"
+        activation: "softmax"
+        regularization: 0.01
+
+        # Training parameters
+        optimizer:
+          type: "AdamW"
+          learning_rate: 0.001
+          weight_decay: 0.0001
+
+        loss_function: "sparse_categorical_crossentropy"
+        metrics: ["accuracy", "sparse_top_k_categorical_accuracy"]
+  training_process:
+    epochs: 100
+    batch_size: 32
+    validation_split: 0.2
+    cross_validation_folds: 3
+
+  # Callbacks
+  callbacks:
+    early_stopping:
+      monitor: "val_accuracy"
+      patience: 15
+      restore_best_weights: true
+
+    reduce_lr:
+      monitor: "val_loss"
+      factor: 0.5
+      patience: 8
+      min_lr: 0.000001
+
+  # Class balancing
+  class_weight: "balanced"  # Automatically compute weights
+
+  # Performance thresholds
+  min_accuracy: 0.45  # Minimum acceptable accuracy to save model
+  min_precision: 0.40  # Minimum precision for trading classes
 # ML Configuration
 
 # Python Configuration
@@ -176,7 +265,116 @@ logging:
     root: INFO
   pattern:
     console: "%d{HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+  log_predictions: true
+  log_feature_importance: true
+  store_prediction_history: true
+  track_live_performance: true
+  compare_to_baseline: true
 
 # Server Configuration
 server:
   port: 8080
+
+
+# ML Training Configuration for Trading Bot
+# This configuration addresses the key issues identified in your model
+
+
+# Outcome classification strategy
+outcomes:
+  # Improved outcome mapping based on PnL and time efficiency
+  STRONG_WIN:
+    pnl_min: 2.0
+    max_hours: 48
+    description: "Quick profitable trades"
+
+  WIN:
+    pnl_min: 0.5
+    pnl_max: 2.0
+    description: "Any profitable trade"
+
+  NEUTRAL:
+    pnl_min: -0.5
+    pnl_max: 0.5
+    max_hours: 24
+    description: "Break-even quick trades"
+
+  SMALL_LOSS:
+    pnl_min: -2.0
+    pnl_max: -0.5
+    description: "Minor losses"
+
+  LOSS:
+    pnl_min: -5.0
+    pnl_max: -2.0
+    description: "Manageable losses"
+
+  STRONG_LOSS:
+    pnl_max: -5.0
+    description: "Major losses"
+
+# Data collection improvements
+backtest_improvements:
+  # Remove look-ahead bias
+  strict_temporal_ordering: true
+  execution_delay_candles: 1
+  slippage_percent: 0.05
+
+  # Better training data collection
+  collect_negative_samples: true  # Include NO_TRADE samples
+  sample_rate: 0.1  # Sample 10% of non-trading periods
+
+  # Risk management during backtesting
+  stop_loss_percent: 3.0
+  take_profit_percent: 6.0
+  max_holding_hours: 240
+
+  # Signal filtering
+  min_confidence: 0.65
+  min_score: 5.0
+
+# Model evaluation and monitoring
+evaluation:
+  # Metrics to track
+  primary_metrics:
+    - accuracy
+    - precision_weighted
+    - recall_weighted
+    - f1_weighted
+
+  trading_specific_metrics:
+    - win_rate_prediction_accuracy
+    - false_positive_rate
+    - risk_adjusted_returns
+
+  # Model validation
+  validation_strategy: "time_series_split"  # Respect temporal order
+  test_set_months: 2  # Use last 2 months as test set
+
+  # Performance monitoring
+  alert_thresholds:
+    accuracy_drop: 0.05  # Alert if accuracy drops by 5%
+    false_positive_spike: 0.1  # Alert if false positives increase
+
+# Production deployment settings
+deployment:
+  model_versioning: true
+  a_b_testing: true
+  fallback_strategy: "conservative"  # Fall back to simpler rules if ML fails
+
+  # Risk controls
+  max_daily_trades: 10
+  max_position_size: 0.05  # 5% of portfolio max
+
+  # Model refresh
+  retrain_frequency_days: 30
+  min_new_samples_for_retrain: 100
+
+# Logging and monitoring
+
+# File paths
+paths:
+  training_data: "src/main/resources/data/training"
+  models: "src/main/resources/data/models"
+  logs: "src/main/resources/data/logs"
+  backtest_results: "src/main/resources/data/backtest"

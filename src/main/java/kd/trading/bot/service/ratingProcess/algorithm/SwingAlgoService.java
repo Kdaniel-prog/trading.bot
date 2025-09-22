@@ -93,72 +93,6 @@ public class SwingAlgoService {
             CoinAnalysis analysis = new CoinAnalysis(symbol, 0.0, Signal.NO_TRADE, lastPrice);
             analysis.setTechnicalIndicators(indicators);
 
-            // === ML DECISION MAKING ===
-            if (useMlPredictions) {
-                // Prepare data for Python ML
-                Map<String, Object> mlData = preparePythonMLData(symbol, currentPrice, indicators);
-
-                // Get ML prediction
-                CompletableFuture<MLPredictionResponse> mlFuture = pythonMLService.getPrediction(
-                        symbol, fourHourKlines, dailyKlines, hourlyKlines, mlData);
-
-                try {
-                    // Wait for ML result (max 5 seconds)
-                    MLPredictionResponse mlPrediction = mlFuture.get(5, java.util.concurrent.TimeUnit.SECONDS);
-
-
-                    // Apply ML decision
-                    analysis.setScore(mlPrediction.getConfidence() * 10);
-                    analysis.setSignal(convertDirectionToSignal(mlPrediction.getDirection()));
-                    analysis.setMlPrediction(mlPrediction);
-                    analysis.setMlConfidence(mlPrediction.getConfidence());
-
-                    // Set directional info
-                    analysis.setDirection(mlPrediction.getDirection());
-                    analysis.setProbabilities(mlPrediction.getProbabilities());
-
-                    log.info("🤖 ML Directional Analysis for {}: Direction={}, Confidence={}, " +
-                                    "LONG={}%, SHORT={}%, HOLD={}%",
-                            symbol,
-                            mlPrediction.getDirection(),
-                            mlPrediction.getConfidence(),
-                            mlPrediction.getProbabilities().getOrDefault("LONG", 0.0) * 100,
-                            mlPrediction.getProbabilities().getOrDefault("SHORT", 0.0) * 100,
-                            mlPrediction.getProbabilities().getOrDefault("HOLD", 0.0) * 100);
-
-                    // Enhanced logging for trading decisions
-                    if (mlPrediction.getDirection() != Direction.HOLD) {
-                        String logMessage = String.format(
-                                "ML Trading Signal for %s: %s (%.1f%% confidence) | " +
-                                        "RSI: %.1f | MACD: %s | Volume: %.1fx | RR: %.2f | " +
-                                        "Probabilities [L:%.1f%%, S:%.1f%%, H:%.1f%%]",
-                                symbol,
-                                mlPrediction.getDirection(),
-                                mlPrediction.getConfidence() * 100,
-                                indicators.getRsi(),
-                                indicators.isMacdBullish() ? "BULLISH" : "BEARISH",
-                                indicators.getVolumeRatio(),
-                                indicators.getRiskRewardRatio(),
-                                mlPrediction.getProbabilities().getOrDefault("LONG", 0.0) * 100,
-                                mlPrediction.getProbabilities().getOrDefault("SHORT", 0.0) * 100,
-                                mlPrediction.getProbabilities().getOrDefault("HOLD", 0.0) * 100
-                        );
-                        logTradingDecision(logMessage);
-                    }
-
-                } catch (Exception e) {
-                    log.warn("⚠️ ML directional prediction failed for {}, using NO_TRADE: {}",
-                            symbol, e.getMessage());
-                    analysis = createNoTradeAnalysis(symbol, lastPrice, "ML prediction failed");
-                }
-            } else {
-                log.debug("📊 Technical Analysis for {}: RSI={}, MACD={}, Volume={}",
-                        symbol, indicators.getRsi(),
-                        indicators.isMacdBullish() ? "BULL" : "BEAR",
-                        indicators.getVolumeRatio());
-                analysis = createNoTradeAnalysis(symbol, lastPrice, "ML disabled");
-            }
-
             return analysis;
 
         } catch (Exception e) {
@@ -173,7 +107,8 @@ public class SwingAlgoService {
     private Direction generateBacktestDirectionalSignal(TechnicalIndicators indicators) {
         double longScore = 0.0;
         double shortScore = 0.0;
-        double holdScore = 2.0; // Bias towards HOLD for conservative approach
+        double holdScore = 0.5; // Bias towards HOLD for conservative approach
+        double threshold = 2.5; // REDUCED from 3.5
 
         // === TREND ANALYSIS ===
         if ("BULLISH".equals(indicators.getPrimaryTrend())) {
@@ -250,19 +185,19 @@ public class SwingAlgoService {
 
         // === DECISION LOGIC ===
         double maxScore = Math.max(Math.max(longScore, shortScore), holdScore);
-        double threshold = 3.5; // Minimum score for action
 
         // Require clear winner with sufficient confidence
         if (maxScore < threshold) {
             return Direction.HOLD;
         }
 
-        if (longScore == maxScore && longScore > shortScore + 0.5) {
+        // Make it easier to generate LONG/SHORT signals
+        if (longScore >= 2.5 && longScore > shortScore + 0.3) {
             return Direction.LONG;
-        } else if (shortScore == maxScore && shortScore > longScore + 0.5) {
+        } else if (shortScore >= 2.5 && shortScore > longScore + 0.3) {
             return Direction.SHORT;
         } else {
-            return Direction.HOLD; // Too close to call
+            return Direction.HOLD;
         }
     }
 

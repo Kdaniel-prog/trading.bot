@@ -1,17 +1,20 @@
 package kd.trading.bot.service.ml;
 
+import kd.trading.bot.enums.Signal;
 import kd.trading.bot.model.ml.MLPredictionResponse;
 import kd.trading.bot.model.backtest.BacktestResult;
 import kd.trading.bot.model.backtest.BacktestTrade;
 import kd.trading.bot.enums.Direction;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import kd.trading.bot.model.ml.MLTradeResult;
 import kd.trading.bot.service.backtest.FeatherDataLoader;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
+import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -19,6 +22,8 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
@@ -34,6 +39,9 @@ public class PythonMLService {
 
     @Value("${python.ml.models.path:src/main/resources/data/models}")
     private String modelsPath;
+
+    @Value("${python.executable:python3}")
+    private String pythonExecutable;
 
     /**
      * KRITIKUS JAVÍTÁS: Training data export LOOK-AHEAD BIAS NÉLKÜL
@@ -257,10 +265,6 @@ public class PythonMLService {
             indicators.put("rsiOversold", rsi < 30);
             indicators.put("rsiOverbought", rsi > 70);
 
-            // Market structure
-            indicators.put("trendAlignment", Math.abs(currentPrice - ema20) / currentPrice < 0.02);
-            indicators.put("bullishStructure", trend.equals("BULLISH"));
-            indicators.put("bearishStructure", trend.equals("BEARISH"));
 
             // Data quality flag
             indicators.put("_dataQuality", "REAL_HISTORICAL");
@@ -444,19 +448,16 @@ public class PythonMLService {
         return new MACDResult(macdLine, signal, histogram);
     }
 
+    @Async
+    public CompletableFuture<Boolean> submitTradeResult(MLTradeResult tradeResult) {
+        log.debug("Trade result submitted: {} - {}%", tradeResult.getSymbol(), tradeResult.getPnlPercent());
+        return CompletableFuture.completedFuture(true);
+    }
+
     /**
      * MACD eredmény osztály
      */
-    private static class MACDResult {
-        final double line;
-        final double signal;
-        final double histogram;
-
-        MACDResult(double line, double signal, double histogram) {
-            this.line = line;
-            this.signal = signal;
-            this.histogram = histogram;
-        }
+    private record MACDResult(double line, double signal, double histogram) {
     }
 
     /**
@@ -514,29 +515,14 @@ public class PythonMLService {
         log.info("  Total samples: {}", samples.size());
         log.info("  Valid indicators: {}/{} ({}%)", validIndicatorCount, samples.size(),
                 (validIndicatorCount * 100 / samples.size()));
-        log.info("  Average PnL: {:.2f}%", avgPnl);
+        log.info("  Average PnL: {}%", avgPnl);
         log.info("  Outcome distribution:");
         outcomeCount.forEach((outcome, count) -> {
             double percentage = (count * 100.0) / samples.size();
-            log.info("    {}: {} ({:.1f}%)", outcome, count, percentage);
+            log.info("    {}: {} ({}%)", outcome, count, percentage);
         });
     }
 
-    // Existing methods remain unchanged for backward compatibility
-    public CompletableFuture<MLPredictionResponse> getPrediction(String symbol,
-                                                                 List<List<Object>> fourHourKlines,
-                                                                 List<List<Object>> dailyKlines,
-                                                                 List<List<Object>> hourlyKlines,
-                                                                 Map<String, Object> mlData) {
-        // Existing implementation remains the same
-        return CompletableFuture.completedFuture(
-                MLPredictionResponse.builder()
-                        .success(true)
-                        .direction(Direction.HOLD)
-                        .confidence(0.5)
-                        .predictedSignal(kd.trading.bot.enums.Signal.NO_TRADE)
-                        .probabilities(Map.of("LONG", 0.33, "SHORT", 0.33, "HOLD", 0.34))
-                        .build()
-        );
-    }
+
+
 }

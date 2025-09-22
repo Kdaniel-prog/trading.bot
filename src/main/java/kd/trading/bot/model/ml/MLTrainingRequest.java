@@ -9,7 +9,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class MLTrainingRequest {
     private List<String> symbols;
-    private String timeframe;
     private LocalDateTime startDate;
     private LocalDateTime endDate;
     private String modelName;
