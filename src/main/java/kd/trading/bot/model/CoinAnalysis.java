@@ -22,9 +22,10 @@ public class CoinAnalysis {
     private Direction direction;                    // ÚJ
     private Map<String, Double> probabilities;      // ÚJ
     private String symbol;
-    private double score;              // Final combined score (0-10)
+    private Double score;              // Final combined score (0-10)
     private Signal signal;             // Final trading decision (from ML)
     private double lastPrice;
+    private Double mlConfidence;
 
     // Original constructor for backward compatibility
     public CoinAnalysis(String symbol, double score, Signal signal, double lastPrice) {
@@ -36,7 +37,6 @@ public class CoinAnalysis {
 
     // === ML INTEGRATION ===
     private MLPredictionResponse mlPrediction;
-    private double mlConfidence;
     private String analysisReason;     // Why NO_TRADE or reason for analysis
 
     // === TECHNICAL ANALYSIS DATA ===

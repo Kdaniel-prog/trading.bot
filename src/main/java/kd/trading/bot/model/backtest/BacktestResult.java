@@ -1,5 +1,6 @@
 package kd.trading.bot.model.backtest;
 
+import kd.trading.bot.model.SwingAlgoTrainingPoint;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -20,6 +21,7 @@ public class BacktestResult {
     private String timeframe;
     private LocalDateTime startDate;
     private LocalDateTime endDate;
+    private List<SwingAlgoTrainingPoint> swingAlgoAnalysisPoints;
 
     // NEW FIELDS - Directional trading statistics
     private int totalSignals;

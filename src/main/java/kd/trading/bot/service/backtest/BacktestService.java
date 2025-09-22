@@ -1,27 +1,17 @@
 package kd.trading.bot.service.backtest;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import kd.trading.bot.enums.Direction;
 import kd.trading.bot.enums.Signal;
 import kd.trading.bot.model.*;
 import kd.trading.bot.model.backtest.BacktestResult;
 import kd.trading.bot.model.backtest.BacktestTrade;
-import kd.trading.bot.model.backtest.TrainingDataPoint;
+import kd.trading.bot.model.SwingAlgoTrainingPoint;
 import kd.trading.bot.service.ratingProcess.algorithm.SwingAlgoService;
-import kd.trading.bot.util.IndicatorUtil;
-import lombok.AccessLevel;
-import lombok.Getter;
 import lombok.RequiredArgsConstructor;
-import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
-import java.io.File;
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -29,18 +19,12 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-@FieldDefaults(level = AccessLevel.PRIVATE)
 public class BacktestService {
 
-    final IndicatorUtil indicatorUtil;
-    final SwingAlgoService swingAlgoService;
+    private final SwingAlgoService swingAlgoService;
+    private final FeatherDataLoader featherDataLoader;
 
-    @Getter
-    final FeatherDataLoader featherDataLoader;
-
-    // FIXED: Consistent timeframe list as constant
-    private static final List<String> SUPPORTED_TIMEFRAMES = List.of("30m", "1h", "4h", "1d");
-
+    // Trading parameters
     @Value("${backtest.initial.balance:10000.0}")
     private double initialBalance;
 
@@ -56,14 +40,8 @@ public class BacktestService {
     @Value("${backtest.risk.take.profit.percent:6.0}")
     private double takeProfitPercent;
 
-    @Value("${backtest.risk.max.holding.hours:240}")
+    @Value("${backtest.risk.max.holding.hours:168}")
     private long maxHoldingHours;
-
-    @Value("${backtest.directional.min.confidence:0.65}")
-    private double minDirectionalConfidence;
-
-    @Value("${backtest.directional.min.score:5.0}")
-    private double minDirectionalScore;
 
     @Value("${backtest.execution.delay.candles:1}")
     private int executionDelayCandles;
@@ -72,523 +50,493 @@ public class BacktestService {
     private double slippagePercent;
 
     /**
-     * FIXED: Single backtest method that returns BacktestResult (not List)
+     * MAIN METHOD: SwingAlgo-focused backtest
      */
-    public BacktestResult runBacktest(String symbol, LocalDateTime startDate, LocalDateTime endDate) {
-        log.info("Starting backtest for {} from {} to {}", symbol, startDate, endDate);
-
-        // Default to 4h timeframe for main analysis
-        String mainTimeframe = "4h";
+    public BacktestResult runSwingAlgoBacktest(String symbol, LocalDateTime startDate, LocalDateTime endDate) {
+        log.info("Starting SwingAlgo-focused backtest for {} from {} to {}", symbol, startDate, endDate);
 
         try {
-            List<HistoricalCandle> mainData =
-                    featherDataLoader.loadHistoricalData(symbol, mainTimeframe, startDate, endDate);
+            // 1. Load historical data for all timeframes
+            Map<String, List<HistoricalCandle>> multiTfData = loadMultiTimeframeData(symbol, startDate, endDate);
 
-            if (mainData.size() < 300) {
-                return createErrorResult(symbol, mainTimeframe,
-                        "Insufficient data: " + mainData.size() + " candles");
+            if (!hasMinimumData(multiTfData)) {
+                return createErrorResult(symbol, "Insufficient multi-timeframe data");
             }
 
-            Map<String, List<HistoricalCandle>> multiTfData =
-                    loadRealTimeframeData(symbol, startDate, endDate);
+            // 2. Run SwingAlgo-based trading simulation
+            SwingAlgoBacktestResult swingResult = runSwingAlgoSimulation(symbol, multiTfData, startDate, endDate);
 
-            BacktestResult result = simulateRealisticTrading(
-                    symbol, mainTimeframe, mainData, multiTfData, startDate, endDate);
+            // 3. Calculate performance metrics
+            BacktestResult result = calculateBacktestMetrics(symbol, swingResult, startDate, endDate);
 
-            log.info("Backtest finished for {}: {} trades, {}% PnL",
-                    symbol, result.getTotalTrades(), result.getTotalReturnPercent());
+            log.info("SwingAlgo backtest completed for {}: {} trades, {}% profit, {} analysis points",
+                    symbol, result.getTotalTrades(), result.getTotalReturnPercent(), swingResult.getAnalysisPoints().size());
+
+            // 4. Store SwingAlgo analysis points for ML training
+            result.setSwingAlgoAnalysisPoints(swingResult.getAnalysisPoints());
 
             return result;
 
         } catch (Exception e) {
-            log.error("Backtest failed for {}: {}", symbol, e.getMessage());
-            return createErrorResult(symbol, mainTimeframe, e.getMessage());
+            log.error("SwingAlgo backtest failed for {}: {}", symbol, e.getMessage(), e);
+            return createErrorResult(symbol, "SwingAlgo backtest error: " + e.getMessage());
         }
     }
 
     /**
-     * Load all timeframe data for multi-timeframe analysis
+     * Load multi-timeframe data for SwingAlgoService
      */
-    private Map<String, List<HistoricalCandle>> loadRealTimeframeData(
-            String symbol, LocalDateTime startDate, LocalDateTime endDate) {
+    private Map<String, List<HistoricalCandle>> loadMultiTimeframeData(String symbol, LocalDateTime startDate, LocalDateTime endDate) {
+        Map<String, List<HistoricalCandle>> data = new HashMap<>();
 
-        Map<String, List<HistoricalCandle>> timeframeData = new HashMap<>();
-        LocalDateTime extendedStart = startDate.minusDays(100);
+        // Extended start date for technical indicators (need ~200 candles history)
+        LocalDateTime extendedStart = startDate.minusDays(200);
+        String[] timeframes = {"4h", "1d", "1h", "30m"};
 
-        for (String timeframe : SUPPORTED_TIMEFRAMES) {
+        for (String timeframe : timeframes) {
             try {
-                List<HistoricalCandle> data = featherDataLoader.loadHistoricalData(
+                List<HistoricalCandle> candleData = featherDataLoader.loadHistoricalData(
                         symbol, timeframe, extendedStart, endDate);
-                timeframeData.put(timeframe, data);
-                log.debug("Loaded {} data: {} candles", timeframe, data.size());
+                data.put(timeframe, candleData);
+                log.debug("Loaded {} {} candles for SwingAlgo analysis", candleData.size(), timeframe);
             } catch (Exception e) {
                 log.warn("Failed to load {} data for {}: {}", timeframe, symbol, e.getMessage());
-                timeframeData.put(timeframe, Collections.emptyList());
+                data.put(timeframe, Collections.emptyList());
             }
         }
 
-        return timeframeData;
+        return data;
     }
 
     /**
-     * FIXED: Realistic trading simulation with proper training data collection
+     * CORE: SwingAlgo-based trading simulation
      */
-    private BacktestResult simulateRealisticTrading(String symbol, String timeframe,
-                                                    List<HistoricalCandle> mainData,
-                                                    Map<String, List<HistoricalCandle>> timeframeData,
-                                                    LocalDateTime startDate, LocalDateTime endDate) {
+    private SwingAlgoBacktestResult runSwingAlgoSimulation(String symbol, Map<String, List<HistoricalCandle>> multiTfData,
+                                                           LocalDateTime startDate, LocalDateTime endDate) {
 
         List<BacktestTrade> trades = new ArrayList<>();
-        List<TrainingDataPoint> trainingData = new ArrayList<>();
+        List<SwingAlgoTrainingPoint> analysisPoints = new ArrayList<>();
 
+        List<HistoricalCandle> mainData = multiTfData.get("4h"); // Use 4h as main timeframe
         double currentBalance = initialBalance;
         Position currentPosition = null;
-        int totalSignals = 0;
-        int tradingStartIndex = Math.max(200, mainData.size() / 10);
 
-        for (int i = tradingStartIndex; i < mainData.size() - executionDelayCandles; i++) {
+        // Start analysis after enough historical data for indicators
+        int analysisStartIndex = Math.max(300, mainData.size() / 5);
+
+        log.info("SwingAlgo simulation: {} total candles, starting analysis at index {}",
+                mainData.size(), analysisStartIndex);
+
+        for (int i = analysisStartIndex; i < mainData.size() - executionDelayCandles; i++) {
             HistoricalCandle currentCandle = mainData.get(i);
+            LocalDateTime currentTime = currentCandle.getTimestamp();
 
-            // Analyze with historical data only
-            CoinAnalysis analysis = analyzeWithHistoricalDataOnly(
-                    symbol, currentCandle, i, mainData, timeframeData);
+            // Skip if before start date
+            if (currentTime.isBefore(startDate)) continue;
 
-            if (analysis == null) continue;
+            try {
+                // MAIN: Call SwingAlgo for TRAINING analysis (separate from live trading)
+                CoinAnalysis swingAnalysis = performSwingAlgoTrainingAnalysis(
+                        symbol, currentCandle, currentTime, multiTfData);
 
-            totalSignals++;
-            Direction direction = analysis.getDirection();
-
-            // Create training data point for this signal
-            TrainingDataPoint dataPoint = createTrainingDataPoint(
-                    currentCandle, analysis, i, mainData, timeframeData);
-
-            // Position management
-            if (currentPosition == null) {
-                if (shouldOpenPosition(direction, analysis)) {
-                    currentPosition = openPositionWithRealism(
-                            symbol, analysis, mainData, i, currentBalance, direction);
-                    if (currentPosition != null) {
-                        currentBalance -= calculateFees(currentPosition, currentPosition.getEntryPrice());
-                        log.debug("Opened {} position for {} at {}",
-                                direction, symbol, currentPosition.getEntryPrice());
-                    }
+                if (swingAnalysis == null) {
+                    log.debug("SwingAlgo returned null analysis for {} at {}", symbol, currentTime);
+                    continue;
                 }
 
-                // If no position opened, mark as NO_TRADE
+                // Create training point from SwingAlgo analysis
+                SwingAlgoTrainingPoint trainingPoint = createSwingAlgoTrainingPoint(
+                        swingAnalysis, currentCandle, currentTime);
+
+                // Position management based on SwingAlgo signals
                 if (currentPosition == null) {
-                    dataPoint.setActualOutcome("NO_TRADE");
-                    dataPoint.setActualPnl(0.0);
-                    trainingData.add(dataPoint);
-                }
-            } else {
-                // Check if should close position
-                if (shouldClosePosition(currentPosition, analysis, currentCandle, direction)) {
-                    BacktestTrade trade = closePositionWithRealism(currentPosition, mainData, i);
-                    if (trade != null) {
-                        trades.add(trade);
-                        currentBalance += trade.getPnl();
-                        currentBalance -= calculateFees(currentPosition, trade.getExitPrice());
-
-                        // Set actual outcome based on trade result
-                        dataPoint.setActualOutcome(determineActualOutcome(trade.getPnlPercent()));
-                        dataPoint.setActualPnl(trade.getPnlPercent());
-                        trainingData.add(dataPoint);
-
-                        log.debug("Closed position: PnL={}%", trade.getPnlPercent());
-                        currentPosition = null;
+                    // Try to open position based on SwingAlgo signal
+                    if (shouldOpenPositionFromSwingAlgo(swingAnalysis)) {
+                        currentPosition = openPosition(swingAnalysis, mainData, i, currentBalance);
+                        if (currentPosition != null) {
+                            currentBalance -= calculateFees(currentPosition.getPositionSize() * currentPosition.getEntryPrice());
+                            trainingPoint.setWasTradeOpened(true);
+                            log.debug("Opened {} position at {} based on SwingAlgo signal",
+                                    swingAnalysis.getSignal(), currentPosition.getEntryPrice());
+                        }
                     }
+
+                    // Set actual outcome as NO_TRADE if no position opened
+                    if (currentPosition == null) {
+                        trainingPoint.setActualOutcome("NO_TRADE");
+                        trainingPoint.setActualPnlPercent(0.0);
+                        trainingPoint.setWasTradeOpened(false);
+                    }
+
                 } else {
-                    // Position still holding
-                    dataPoint.setActualOutcome("HOLDING");
-                    dataPoint.setActualPnl(calculatePnlPercent(currentPosition, currentCandle.getClose()));
-                    trainingData.add(dataPoint);
+                    // Check if should close position
+                    if (shouldClosePosition(currentPosition, swingAnalysis, currentCandle)) {
+                        BacktestTrade trade = closePosition(currentPosition, mainData, i);
+                        if (trade != null) {
+                            trades.add(trade);
+                            currentBalance += trade.getPnl();
+
+                            // Log detailed fee breakdown for first few trades
+                            if (trades.size() <= 3) {
+                                logTradeExample(trade);
+                            }
+
+                            // Update training point with actual trade outcome
+                            trainingPoint.setActualOutcome(determineTradeOutcome(trade.getPnlPercent()));
+                            trainingPoint.setActualPnlPercent(trade.getPnlPercent());
+                            trainingPoint.setTradeDurationHours(trade.getHoldingTimeHours());
+                            trainingPoint.setWasTradeOpened(true);
+
+                            // Set exit reason based on why trade was closed
+                            trainingPoint.setExitReason(determineExitReason(trade, currentPosition, currentCandle));
+
+                            log.debug("Closed position: PnL={}%, Duration={}h, Outcome={}, Reason={}",
+                                    trade.getPnlPercent(), trade.getHoldingTimeHours(),
+                                    trainingPoint.getActualOutcome(), trainingPoint.getExitReason());
+                            currentPosition = null;
+                        }
+                    } else {
+                        // Position still holding
+                        double unrealizedPnl = calculateUnrealizedPnlPercent(currentPosition, currentCandle.getClose());
+                        trainingPoint.setActualOutcome("HOLDING");
+                        trainingPoint.setActualPnlPercent(unrealizedPnl);
+                        trainingPoint.setTradeDurationHours(ChronoUnit.HOURS.between(currentPosition.getEntryTime(), currentTime));
+                        trainingPoint.setWasTradeOpened(true);
+                    }
                 }
+
+                // Add SwingAlgo analysis to training data
+                analysisPoints.add(trainingPoint);
+
+            } catch (Exception e) {
+                log.warn("SwingAlgo analysis failed at {}: {}", currentTime, e.getMessage());
             }
         }
 
-        // Close remaining position
+        // Close any remaining position
         if (currentPosition != null) {
-            BacktestTrade finalTrade = closePositionWithRealism(currentPosition, mainData, mainData.size() - 1);
+            BacktestTrade finalTrade = closePosition(currentPosition, mainData, mainData.size() - 1);
             if (finalTrade != null) {
                 trades.add(finalTrade);
                 currentBalance += finalTrade.getPnl();
             }
         }
 
-        // FIXED: Export training data with proper validation
-        log.info("Collected {} training data points for {}", trainingData.size(), symbol);
-        if (!trainingData.isEmpty()) {
-            exportTrainingDataAsJson(trainingData, symbol, timeframe);
-        }
-
-        return calculateBacktestMetrics(symbol, timeframe, trades, currentBalance,
-                startDate, endDate, totalSignals);
-    }
-
-    /**
-     * Create training data point with real technical indicators
-     */
-    private TrainingDataPoint createTrainingDataPoint(HistoricalCandle currentCandle, CoinAnalysis analysis,
-                                                      int currentIndex, List<HistoricalCandle> mainData,
-                                                      Map<String, List<HistoricalCandle>> timeframeData) {
-
-        // Calculate real technical indicators using IndicatorUtil
-        Map<String, Object> indicators = calculateRealTechnicalIndicators(
-                currentCandle.getTimestamp(), timeframeData, currentIndex, mainData);
-
-        // Add analysis indicators
-        Map<String, Object> analysisIndicators = extractIndicatorsFromAnalysis(analysis);
-        indicators.putAll(analysisIndicators);
-
-        return TrainingDataPoint.builder()
-                .timestamp(currentCandle.getTimestamp())
-                .symbol(analysis.getSymbol())
-                .price(currentCandle.getClose())
-                .predictedDirection(analysis.getDirection())
-                .predictedSignal(convertDirectionToSignal(analysis.getDirection()))
-                .confidence(analysis.getMlConfidence())
-                .score(analysis.getScore())
-                .technicalIndicators(indicators)
-                .tradingRule(analysis.getTradingRule())
-                .actualOutcome(null) // Set later
-                .actualPnl(null)     // Set later
+        return SwingAlgoBacktestResult.builder()
+                .trades(trades)
+                .analysisPoints(analysisPoints)
+                .finalBalance(currentBalance)
+                .totalAnalysisPoints(analysisPoints.size())
                 .build();
     }
 
     /**
-     * FIXED: Calculate real technical indicators using IndicatorUtil
+     * SEPARATED METHOD FOR TRAINING: SwingAlgo analysis for backtesting/training
+     * This method is specifically for generating training data from historical analysis
      */
-    private Map<String, Object> calculateRealTechnicalIndicators(LocalDateTime timestamp,
-                                                                 Map<String, List<HistoricalCandle>> timeframeData,
-                                                                 int currentIndex,
-                                                                 List<HistoricalCandle> mainData) {
-        Map<String, Object> indicators = new HashMap<>();
-
+    private CoinAnalysis performSwingAlgoTrainingAnalysis(String symbol, HistoricalCandle currentCandle,
+                                                          LocalDateTime currentTime, Map<String, List<HistoricalCandle>> multiTfData) {
         try {
-            // Get 4H data up to current timestamp
-            List<HistoricalCandle> h4Data = getHistoricalDataUpTo(timeframeData.get("4h"), timestamp);
-            if (h4Data.size() >= 50) {
-                List<Double> closes = h4Data.stream()
-                        .map(HistoricalCandle::getClose)
-                        .collect(Collectors.toList());
-                List<Double> highs = h4Data.stream()
-                        .map(HistoricalCandle::getHigh)
-                        .collect(Collectors.toList());
-                List<Double> lows = h4Data.stream()
-                        .map(HistoricalCandle::getLow)
-                        .collect(Collectors.toList());
-                List<Double> volumes = h4Data.stream()
-                        .map(HistoricalCandle::getVolume)
-                        .toList();
-
-                // Use IndicatorUtil for calculations
-                double rsi = indicatorUtil.RSI(closes, 14);
-                double ema20 = indicatorUtil.EMA(closes, 20);
-                double ema50 = indicatorUtil.EMA(closes, 50);
-                double sma20 = indicatorUtil.SMA(closes, 20);
-                double[] macd = indicatorUtil.MACD(closes, 12, 26, 9);
-                double atr = indicatorUtil.calculateATR(highs, lows, closes, 14);
-                double[] supportResistance = indicatorUtil.calculateSupportResistance(highs, lows, closes);
-
-                // Store calculated indicators
-                indicators.put("rsi", rsi);
-                indicators.put("ema20", ema20);
-                indicators.put("ema50", ema50);
-                indicators.put("sma20", sma20);
-                indicators.put("macd_line", macd[0]);
-                indicators.put("macd_signal", macd[1]);
-                indicators.put("macd_histogram", macd[2]);
-                indicators.put("atr", atr);
-                indicators.put("support_level", supportResistance[0]);
-                indicators.put("resistance_level", supportResistance[1]);
-
-                // Price position indicators
-                double currentPrice = closes.get(closes.size() - 1);
-                indicators.put("current_price", currentPrice);
-                indicators.put("price_above_ema20", currentPrice > ema20);
-                indicators.put("price_above_ema50", currentPrice > ema50);
-                indicators.put("ema20_above_ema50", ema20 > ema50);
-
-                // Volume analysis
-                double avgVolume = volumes.stream().mapToDouble(Double::doubleValue).average().orElse(1.0);
-                double currentVolume = volumes.get(volumes.size() - 1);
-                double volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 1.0;
-                indicators.put("volume_ratio", volumeRatio);
-                indicators.put("high_volume", volumeRatio > 1.5);
-
-                // Pattern recognition
-                indicators.put("higher_highs", indicatorUtil.isHigherHighsPattern(highs, 20));
-                indicators.put("lower_lows", indicatorUtil.isLowerLowsPattern(lows, 20));
-                indicators.put("breakout_pattern", indicatorUtil.isBreakoutPattern(highs, lows, closes));
-                indicators.put("reversal_pattern", indicatorUtil.isReversalPattern(highs, lows, closes));
-
-                // Momentum and volatility
-                double momentum = indicatorUtil.calculateMomentum(closes, 10);
-                double volatility = indicatorUtil.calculateVolatility(closes, 20);
-                indicators.put("momentum", momentum);
-                indicators.put("volatility_percent", volatility);
-
-                log.debug("Calculated technical indicators for {}: RSI={}, EMA20={}, Volume={}",
-                        timestamp, rsi, ema20, volumeRatio);
-            }
-
-            // Get daily data for long-term trends
-            List<HistoricalCandle> dailyData = getHistoricalDataUpTo(timeframeData.get("1d"), timestamp);
-            if (dailyData.size() >= 200) {
-                List<Double> dailyCloses = dailyData.stream()
-                        .map(HistoricalCandle::getClose)
-                        .collect(Collectors.toList());
-
-                double ema200Daily = indicatorUtil.EMA(dailyCloses, Math.min(200, dailyCloses.size()));
-                indicators.put("ema200_daily", ema200Daily);
-
-                double currentPrice = dailyCloses.get(dailyCloses.size() - 1);
-                indicators.put("price_above_ema200", currentPrice > ema200Daily);
-            }
-
-        } catch (Exception e) {
-            log.error("Error calculating technical indicators: {}", e.getMessage());
-            // Set safe defaults
-            indicators.put("rsi", 50.0);
-            indicators.put("ema20", 0.0);
-            indicators.put("error", "calculation_failed");
-        }
-
-        return indicators;
-    }
-
-    /**
-     * FIXED: Export training data as proper JSON array
-     */
-    private void exportTrainingDataAsJson(List<TrainingDataPoint> trainingData, String symbol, String timeframe) {
-        if (trainingData.isEmpty()) {
-            log.warn("No training data to export for {} {}", symbol, timeframe);
-            return;
-        }
-
-        try {
-            // Create export directory
-            File exportDir = new File("src/main/resources/data/training");
-            if (!exportDir.exists()) {
-                boolean created = exportDir.mkdirs();
-                log.info("Created training data directory: {}", exportDir.getAbsolutePath());
-            }
-
-            // Generate filename
-            String fileName = String.format("training_data_%s_%s_%d.json",
-                    symbol.replace("/", "").replace("_", ""),
-                    timeframe,
-                    System.currentTimeMillis());
-            File outputFile = new File(exportDir, fileName);
-
-            // Filter valid data points
-            List<TrainingDataPoint> validData = trainingData.stream()
-                    .filter(point -> point != null &&
-                            point.getTechnicalIndicators() != null &&
-                            !point.getTechnicalIndicators().isEmpty())
-                    .collect(Collectors.toList());
-
-            if (validData.isEmpty()) {
-                log.error("No valid training data points after filtering for {} {}", symbol, timeframe);
-                return;
-            }
-
-            // FIXED: Create proper JSON structure (array, not single object)
-            Map<String, Object> exportWrapper = new HashMap<>();
-            exportWrapper.put("metadata", Map.of(
-                    "symbol", symbol,
-                    "timeframe", timeframe,
-                    "generated_at", LocalDateTime.now().toString(),
-                    "total_points", validData.size(),
-                    "version", "2.0"
-            ));
-            exportWrapper.put("training_data", validData); // This creates the array structure
-
-            // Configure ObjectMapper
-            ObjectMapper mapper = new ObjectMapper();
-            mapper.enable(SerializationFeature.INDENT_OUTPUT);
-            mapper.registerModule(new JavaTimeModule());
-            mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-
-            // Write to file
-            mapper.writeValue(outputFile, exportWrapper);
-
-            log.info("Training data exported: {} ({} points)", outputFile.getName(), validData.size());
-
-            // Log sample for verification
-            if (!validData.isEmpty()) {
-                TrainingDataPoint sample = validData.get(0);
-                log.info("Sample: symbol={}, outcome={}, indicators={}",
-                        sample.getSymbol(), sample.getActualOutcome(),
-                        sample.getTechnicalIndicators().size());
-            }
-
-        } catch (Exception e) {
-            log.error("Failed to export training data for {} {}: {}", symbol, timeframe, e.getMessage(), e);
-        }
-    }
-
-    // === HELPER METHODS (unchanged but needed) ===
-
-    private CoinAnalysis analyzeWithHistoricalDataOnly(String symbol, HistoricalCandle currentCandle,
-                                                       int currentIndex, List<HistoricalCandle> mainData,
-                                                       Map<String, List<HistoricalCandle>> timeframeData) {
-        try {
-            List<List<Object>> thirtyMinKlines = buildHistoricalKlines(
-                    timeframeData.get("30m"), currentCandle.getTimestamp(), 200);
-            List<List<Object>> hourlyKlines = buildHistoricalKlines(
-                    timeframeData.get("1h"), currentCandle.getTimestamp(), 100);
+            // Build historical klines data up to current time (no look-ahead bias)
             List<List<Object>> fourHourKlines = buildHistoricalKlines(
-                    timeframeData.get("4h"), currentCandle.getTimestamp(), 300);
+                    filterDataBeforeTime(multiTfData.get("4h"), currentTime), 300);
             List<List<Object>> dailyKlines = buildHistoricalKlines(
-                    timeframeData.get("1d"), currentCandle.getTimestamp(), 200);
+                    filterDataBeforeTime(multiTfData.get("1d"), currentTime), 200);
+            List<List<Object>> hourlyKlines = buildHistoricalKlines(
+                    filterDataBeforeTime(multiTfData.get("1h"), currentTime), 100);
+            List<List<Object>> thirtyMinKlines = buildHistoricalKlines(
+                    filterDataBeforeTime(multiTfData.get("30m"), currentTime), 50);
 
+            // Validate minimum data requirements
             if (fourHourKlines.size() < 50 || dailyKlines.size() < 30) {
                 return null;
             }
 
-            return swingAlgoService.analyzeHistoricalCoin(
-                    symbol, currentCandle.getClose(),
-                    fourHourKlines, dailyKlines, hourlyKlines, thirtyMinKlines);
+            log.debug("Training analysis for {}: 4h={}, daily={}, hourly={}, 30m={} candles",
+                    symbol, fourHourKlines.size(), dailyKlines.size(), hourlyKlines.size(), thirtyMinKlines.size());
+
+            // Call SwingAlgoService with historical data for TRAINING
+            CoinAnalysis analysis = swingAlgoService.analyzeHistoricalCoin(
+                    symbol,
+                    currentCandle.getClose(),
+                    fourHourKlines,
+                    dailyKlines,
+                    hourlyKlines,
+                    thirtyMinKlines
+            );
+
+            if (analysis != null) {
+                log.debug("SwingAlgo training analysis result for {} at {}: signal={}, score={}, confidence={}",
+                        symbol, currentTime, analysis.getSignal(), analysis.getScore(), analysis.getMlConfidence());
+            }
+
+            return analysis;
 
         } catch (Exception e) {
-            log.warn("Analysis failed for {} at {}: {}", symbol, currentCandle.getTimestamp(), e.getMessage());
+            log.warn("SwingAlgo training analysis error for {} at {}: {}", symbol, currentTime, e.getMessage());
             return null;
         }
     }
 
-    private List<List<Object>> buildHistoricalKlines(List<HistoricalCandle> timeframeData,
-                                                     LocalDateTime currentTime, int lookback) {
-        if (timeframeData == null || timeframeData.isEmpty()) {
-            return Collections.emptyList();
-        }
-
-        List<HistoricalCandle> historicalOnly = timeframeData.stream()
-                .filter(candle -> candle.getTimestamp().isBefore(currentTime))
-                .toList();
-
-        if (historicalOnly.isEmpty()) {
-            return Collections.emptyList();
-        }
-
-        int startIndex = Math.max(0, historicalOnly.size() - lookback);
-
-        return historicalOnly.subList(startIndex, historicalOnly.size()).stream()
-                .map(candle -> List.<Object>of(
-                        candle.getTimestamp().toEpochSecond(ZoneOffset.UTC) * 1000,
-                        candle.getOpen(),
-                        candle.getHigh(),
-                        candle.getLow(),
-                        candle.getClose(),
-                        candle.getVolume()
-                ))
-                .collect(Collectors.toList());
-    }
-
-    private Map<String, Object> extractIndicatorsFromAnalysis(CoinAnalysis analysis) {
-        Map<String, Object> indicators = new HashMap<>();
-        if (analysis == null) return indicators;
-
+    /**
+     * SEPARATED METHOD FOR LIVE TRADING: SwingAlgo analysis for real-time trading
+     * This method would be used in live trading scenarios
+     */
+    private CoinAnalysis performSwingAlgoLiveAnalysis(String symbol, double currentPrice,
+                                                      Map<String, List<HistoricalCandle>> multiTfData) {
         try {
-            indicators.put("analysis_ml_confidence", analysis.getMlConfidence());
-            indicators.put("analysis_direction", analysis.getDirection().name());
-            indicators.put("analysis_score", analysis.getScore());
-            indicators.put("analysis_last_price", analysis.getLastPrice());
-            indicators.put("analysis_trading_rule", analysis.getTradingRule());
+            // For live trading, use most recent data (no time filtering needed)
+            List<List<Object>> fourHourKlines = buildHistoricalKlines(multiTfData.get("4h"), 300);
+            List<List<Object>> dailyKlines = buildHistoricalKlines(multiTfData.get("1d"), 200);
+            List<List<Object>> hourlyKlines = buildHistoricalKlines(multiTfData.get("1h"), 100);
+            List<List<Object>> thirtyMinKlines = buildHistoricalKlines(multiTfData.get("30m"), 50);
 
-            TechnicalIndicators t = analysis.getTechnicalIndicators();
-            if (t != null) {
-                indicators.put("analysis_rsi", t.getRsi());
-                indicators.put("analysis_ema20_4h", t.getEma20_4h());
-                indicators.put("analysis_ema50_4h", t.getEma50_4h());
-                indicators.put("analysis_volume_ratio", t.getVolumeRatio());
-                indicators.put("analysis_macd_line", t.getMacdLine());
-                indicators.put("analysis_macd_signal", t.getMacdSignal());
-                indicators.put("analysis_trend_strength", t.getTrendStrength());
-                indicators.put("analysis_bullish_structure", t.isBullishMarketStructure());
-                indicators.put("analysis_bearish_structure", t.isBearishMarketStructure());
+            // Validate minimum data requirements
+            if (fourHourKlines.size() < 50 || dailyKlines.size() < 30) {
+                log.warn("Insufficient data for live SwingAlgo analysis: 4h={}, daily={}",
+                        fourHourKlines.size(), dailyKlines.size());
+                return null;
             }
 
+            log.debug("Live analysis for {}: 4h={}, daily={}, hourly={}, 30m={} candles",
+                    symbol, fourHourKlines.size(), dailyKlines.size(), hourlyKlines.size(), thirtyMinKlines.size());
+
+            // Call SwingAlgoService for LIVE trading
+            CoinAnalysis analysis = swingAlgoService.analyzeHistoricalCoin(
+                    symbol,
+                    currentPrice,
+                    fourHourKlines,
+                    dailyKlines,
+                    hourlyKlines,
+                    thirtyMinKlines
+            );
+
+            if (analysis != null) {
+                log.info("SwingAlgo live analysis result for {}: signal={}, score={}, confidence={}",
+                        symbol, analysis.getSignal(), analysis.getScore(), analysis.getMlConfidence());
+            }
+
+            return analysis;
+
         } catch (Exception e) {
-            log.error("Error extracting indicators from analysis: {}", e.getMessage());
+            log.error("SwingAlgo live analysis error for {}: {}", symbol, e.getMessage(), e);
+            return null;
+        }
+    }
+
+    /**
+     * FIXED: Create training point from SwingAlgo analysis with proper signal mapping
+     */
+    private SwingAlgoTrainingPoint createSwingAlgoTrainingPoint(CoinAnalysis swingAnalysis,
+                                                                HistoricalCandle currentCandle,
+                                                                LocalDateTime analysisTime) {
+
+        // FIXED: Properly map the signal from SwingAlgo analysis
+        Signal mappedSignal = swingAnalysis.getSignal() != null ? swingAnalysis.getSignal() : Signal.NO_TRADE;
+
+        SwingAlgoTrainingPoint point = SwingAlgoTrainingPoint.builder()
+                .timestamp(analysisTime)
+                .symbol(swingAnalysis.getSymbol())
+                .price(currentCandle.getClose())
+                .swingAlgoSignal(mappedSignal)  // FIXED: Properly set the signal
+                .swingAlgoScore(swingAnalysis.getScore() != null ? swingAnalysis.getScore() : 0.0)
+                .swingAlgoConfidence(swingAnalysis.getMlConfidence())
+                .build();
+
+        // Log the signal mapping for debugging
+        log.debug("Signal mapping for {}: original={}, mapped={}, score={}, confidence={}",
+                swingAnalysis.getSymbol(), swingAnalysis.getSignal(), mappedSignal,
+                swingAnalysis.getScore(), swingAnalysis.getMlConfidence());
+
+        // Extract ALL technical indicators from SwingAlgo
+        if (swingAnalysis.getTechnicalIndicators() != null) {
+            TechnicalIndicators indicators = swingAnalysis.getTechnicalIndicators();
+
+            Map<String, Object> features = new HashMap<>();
+
+            // Core indicators
+            addFeatureIfNotNull(features, "rsi", indicators.getRsi());
+            addFeatureIfNotNull(features, "ema20_4h", indicators.getEma20_4h());
+            addFeatureIfNotNull(features, "ema50_4h", indicators.getEma50_4h());
+            addFeatureIfNotNull(features, "ema200_daily", indicators.getEma200_daily());
+
+            // Trend indicators
+            addFeatureIfNotNull(features, "primaryTrend", indicators.getPrimaryTrend());
+            addFeatureIfNotNull(features, "shortTermTrend", indicators.getShortTermTrend());
+            addFeatureIfNotNull(features, "trendAlignment", indicators.isTrendAlignment());
+            addFeatureIfNotNull(features, "trendStrength", indicators.getTrendStrength());
+
+            // MACD indicators
+            addFeatureIfNotNull(features, "macdLine", indicators.getMacdLine());
+            addFeatureIfNotNull(features, "macdSignal", indicators.getMacdSignal());
+            addFeatureIfNotNull(features, "macdHistogram", indicators.getMacdHistogram());
+            addFeatureIfNotNull(features, "macdBullish", indicators.isMacdBullish());
+            addFeatureIfNotNull(features, "macdBearish", indicators.isMacdBearish());
+
+            // Volume indicators
+            addFeatureIfNotNull(features, "volumeRatio", indicators.getVolumeRatio());
+            addFeatureIfNotNull(features, "strongVolume", indicators.isStrongVolume());
+
+            // Volatility indicators
+            addFeatureIfNotNull(features, "atr", indicators.getAtr());
+            addFeatureIfNotNull(features, "volatilityPercent", indicators.getVolatilityPercent());
+            addFeatureIfNotNull(features, "riskRewardRatio", indicators.getRiskRewardRatio());
+
+            // Support/Resistance
+            addFeatureIfNotNull(features, "nearestSupport", indicators.getNearestSupport());
+            addFeatureIfNotNull(features, "nearestResistance", indicators.getNearestResistance());
+
+            // Structure indicators
+            addFeatureIfNotNull(features, "bullishStructure", indicators.isBullishStructure());
+            addFeatureIfNotNull(features, "bearishStructure", indicators.isBearishStructure());
+            addFeatureIfNotNull(features, "consolidation", indicators.isConsolidation());
+
+
+// Add derived features with safe null checks
+            double ema20 = indicators.getEma20_4h();
+            double ema50 = indicators.getEma50_4h();
+            double rsi   = indicators.getRsi();
+            Double vol   = indicators.getVolumeRatio();
+
+            if (ema20 > 0) {
+                features.put("price_vs_ema20", currentCandle.getClose() / ema20);
+            }
+
+            if (ema50 > 0) {
+                features.put("price_vs_ema50", currentCandle.getClose() / ema50);
+            }
+
+            if (ema50 > 0) {
+                features.put("ema_alignment", ema20 > ema50 ? 1.0 : 0.0);
+            }
+
+            features.put("rsi_oversold", rsi < 30 ? 1.0 : 0.0);
+            features.put("rsi_overbought", rsi > 70 ? 1.0 : 0.0);
+
+            features.put("high_volume", vol > 1.5 ? 1.0 : 0.0);
+
+            point.setSwingAlgoFeatures(features);
+
+            log.debug("Extracted {} SwingAlgo features for {}", features.size(), swingAnalysis.getSymbol());
+        } else {
+            log.warn("No technical indicators found in SwingAlgo analysis for {}", swingAnalysis.getSymbol());
         }
 
-        return indicators;
+        return point;
     }
 
-    private List<HistoricalCandle> getHistoricalDataUpTo(List<HistoricalCandle> data, LocalDateTime timestamp) {
-        if (data == null) return Collections.emptyList();
-        return data.stream()
-                .filter(c -> c.getTimestamp().isBefore(timestamp) || c.getTimestamp().isEqual(timestamp))
-                .collect(Collectors.toList());
+    /**
+     * Helper method to safely add features, handling null values
+     */
+    private void addFeatureIfNotNull(Map<String, Object> features, String key, Object value) {
+        if (value != null) {
+            if (value instanceof Boolean) {
+                features.put(key, ((Boolean) value) ? 1.0 : 0.0);
+            } else if (value instanceof Number) {
+                features.put(key, ((Number) value).doubleValue());
+            } else {
+                features.put(key, value.toString());
+            }
+        }
     }
 
-    // Position management methods remain the same
-    private boolean shouldOpenPosition(Direction direction, CoinAnalysis analysis) {
-        return direction != Direction.HOLD &&
-                analysis.getScore() >= minDirectionalScore &&
-                analysis.getMlConfidence() >= minDirectionalConfidence;
+    // Helper methods for position management
+    private boolean shouldOpenPositionFromSwingAlgo(CoinAnalysis analysis) {
+        boolean hasValidSignal = analysis.getSignal() != null && analysis.getSignal() != Signal.NO_TRADE;
+        boolean hasMinScore = analysis.getScore() != null && analysis.getScore() >= 5.0;
+        boolean hasMinConfidence = analysis.getMlConfidence() != null && analysis.getMlConfidence() >= 0.6;
+
+        boolean shouldOpen = hasValidSignal && hasMinScore && hasMinConfidence;
+
+        log.debug("Position opening decision for {}: signal={}, score={}, confidence={}, shouldOpen={}",
+                analysis.getSymbol(), analysis.getSignal(), analysis.getScore(), analysis.getMlConfidence(), shouldOpen);
+
+        return shouldOpen;
     }
 
-    private Position openPositionWithRealism(String symbol, CoinAnalysis analysis,
-                                             List<HistoricalCandle> mainData, int signalIndex,
-                                             double balance, Direction direction) {
+    private Position openPosition(CoinAnalysis analysis, List<HistoricalCandle> mainData, int signalIndex, double balance) {
         int executionIndex = Math.min(signalIndex + executionDelayCandles, mainData.size() - 1);
         HistoricalCandle executionCandle = mainData.get(executionIndex);
 
         double executionPrice = executionCandle.getOpen();
-        if (direction == Direction.LONG) {
+
+        // Apply slippage based on direction
+        if (analysis.getSignal() == Signal.LONG) {
             executionPrice *= (1 + slippagePercent / 100.0);
         } else {
             executionPrice *= (1 - slippagePercent / 100.0);
         }
 
+        // Calculate position size based on configured percentage
         double notional = balance * positionSizePercent;
         double positionSize = notional / executionPrice;
 
         return Position.builder()
-                .symbol(symbol)
-                .side(convertDirectionToSignal(direction))
+                .symbol(analysis.getSymbol())
+                .side(analysis.getSignal())
                 .entryPrice(executionPrice)
                 .positionSize(positionSize)
                 .entryTime(executionCandle.getTimestamp())
-                .tradingRule(analysis.getTradingRule())
+                .tradingRule(analysis.getTradingRule() != null ? analysis.getTradingRule() : 0)
                 .score(analysis.getScore())
-                .direction(direction)
                 .build();
     }
 
-    private boolean shouldClosePosition(Position position, CoinAnalysis analysis,
-                                        HistoricalCandle candle, Direction currentDirection) {
-        double pnlPercent = calculatePnlPercent(position, candle.getClose());
+    private boolean shouldClosePosition(Position position, CoinAnalysis analysis, HistoricalCandle candle) {
+        // Apply configured stop loss and take profit
+        double pnlPercent = calculateUnrealizedPnlPercent(position, candle.getClose());
         if (pnlPercent <= -stopLossPercent || pnlPercent >= takeProfitPercent) {
+            log.debug("Closing position due to SL/TP: PnL={}%, SL={}%, TP={}%",
+                    pnlPercent, stopLossPercent, takeProfitPercent);
             return true;
         }
 
+        // Apply configured max holding time
         long hours = ChronoUnit.HOURS.between(position.getEntryTime(), candle.getTimestamp());
         if (hours >= maxHoldingHours) {
+            log.debug("Closing position due to max holding time: {}h >= {}h", hours, maxHoldingHours);
             return true;
         }
 
-        Direction posDirection = getPositionDirection(position);
-        return (posDirection == Direction.LONG && currentDirection == Direction.SHORT) ||
-                (posDirection == Direction.SHORT && currentDirection == Direction.LONG);
+        // SwingAlgo signal reversal (with null checks)
+        if (analysis.getSignal() != null) {
+            if (position.getSide() == Signal.LONG && analysis.getSignal() == Signal.SHORT) {
+                log.debug("Closing LONG position due to SwingAlgo SHORT signal");
+                return true;
+            }
+            if (position.getSide() == Signal.SHORT && analysis.getSignal() == Signal.LONG) {
+                log.debug("Closing SHORT position due to SwingAlgo LONG signal");
+                return true;
+            }
+        }
+
+        return false;
     }
 
-    private BacktestTrade closePositionWithRealism(Position position, List<HistoricalCandle> mainData, int currentIndex) {
+    private BacktestTrade closePosition(Position position, List<HistoricalCandle> mainData, int currentIndex) {
         int executionIndex = Math.min(currentIndex + executionDelayCandles, mainData.size() - 1);
         HistoricalCandle executionCandle = mainData.get(executionIndex);
 
         double exitPrice = executionCandle.getOpen();
-        Direction posDirection = getPositionDirection(position);
-        if (posDirection == Direction.LONG) {
-            exitPrice *= (1 - slippagePercent / 100.0);
+
+        // Apply slippage when closing
+        if (position.getSide() == Signal.LONG) {
+            exitPrice *= (1 - slippagePercent / 100.0); // Sell at slightly lower price
         } else {
-            exitPrice *= (1 + slippagePercent / 100.0);
+            exitPrice *= (1 + slippagePercent / 100.0); // Buy to cover at slightly higher price
         }
 
-        double pnl = calculateUnrealizedPnl(position, exitPrice);
+        double pnl = calculateRealizedPnl(position, exitPrice);
         double pnlPercent = calculatePnlPercent(position, exitPrice);
+
+        // Calculate fees (entry + exit)
+        double entryFee = calculateFees(position.getPositionSize() * position.getEntryPrice());
+        double exitFee = calculateFees(position.getPositionSize() * exitPrice);
+        double totalFees = entryFee + exitFee;
+
+        // Subtract fees from PnL
+        double netPnl = pnl - totalFees;
+        double netPnlPercent = (netPnl / (position.getPositionSize() * position.getEntryPrice())) * 100;
 
         return BacktestTrade.builder()
                 .symbol(position.getSymbol())
@@ -598,15 +546,15 @@ public class BacktestService {
                 .positionSize(position.getPositionSize())
                 .entryTime(position.getEntryTime())
                 .exitTime(executionCandle.getTimestamp())
-                .pnl(pnl)
-                .pnlPercent(pnlPercent)
+                .pnl(netPnl) // Net PnL after fees
+                .pnlPercent(netPnlPercent) // Net PnL percentage
                 .tradingRule(position.getTradingRule())
                 .score(position.getScore())
-                .direction(posDirection)
                 .build();
     }
 
-    private double calculatePnlPercent(Position position, double currentPrice) {
+    // Helper calculation methods
+    private double calculateUnrealizedPnlPercent(Position position, double currentPrice) {
         if (position.getSide() == Signal.LONG) {
             return (currentPrice - position.getEntryPrice()) / position.getEntryPrice() * 100;
         } else {
@@ -614,25 +562,120 @@ public class BacktestService {
         }
     }
 
-    private String determineActualOutcome(double pnlPercent) {
-        if (pnlPercent > 3.0) return "STRONG_WIN";
-        if (pnlPercent > 0.5) return "WIN";
-        if (pnlPercent > -0.5) return "NEUTRAL";
-        if (pnlPercent > -3.0) return "LOSS";
+    private double calculateRealizedPnl(Position position, double exitPrice) {
+        if (position.getSide() == Signal.LONG) {
+            return position.getPositionSize() * (exitPrice - position.getEntryPrice());
+        } else {
+            return position.getPositionSize() * (position.getEntryPrice() - exitPrice);
+        }
+    }
+
+    private double calculatePnlPercent(Position position, double exitPrice) {
+        if (position.getSide() == Signal.LONG) {
+            return (exitPrice - position.getEntryPrice()) / position.getEntryPrice() * 100;
+        } else {
+            return (position.getEntryPrice() - exitPrice) / position.getEntryPrice() * 100;
+        }
+    }
+
+    private double calculateFees(double notional) {
+        return notional * feeRate;
+    }
+
+    /**
+     * EXAMPLE: Realistic fee calculation with detailed logging
+     */
+    private void logTradeExample(BacktestTrade trade) {
+        double entryNotional = trade.getPositionSize() * trade.getEntryPrice();
+        double exitNotional = trade.getPositionSize() * trade.getExitPrice();
+        double entryFee = entryNotional * feeRate;
+        double exitFee = exitNotional * feeRate;
+        double totalFees = entryFee + exitFee;
+        double grossPnl = calculateRealizedPnl(Position.builder()
+                .side(trade.getSide())
+                .positionSize(trade.getPositionSize())
+                .entryPrice(trade.getEntryPrice())
+                .build(), trade.getExitPrice());
+
+        log.debug("Trade fees breakdown for {}: Entry=${:.2f} (fee=${:.3f}), Exit=${:.2f} (fee=${:.3f}), " +
+                        "Gross PnL=${:.2f}, Net PnL=${:.2f}, Fees=${:.3f}",
+                trade.getSymbol(), entryNotional, entryFee, exitNotional, exitFee,
+                grossPnl, trade.getPnl(), totalFees);
+    }
+
+    private String determineTradeOutcome(double pnlPercent) {
+        if (pnlPercent > 5.0) return "STRONG_WIN";
+        if (pnlPercent > 1.0) return "WIN";
+        if (pnlPercent > -1.0) return "NEUTRAL";
+        if (pnlPercent > -5.0) return "LOSS";
         return "STRONG_LOSS";
     }
 
-    // Standard helper methods
-    private BacktestResult calculateBacktestMetrics(String symbol, String timeframe, List<BacktestTrade> trades,
-                                                    double finalBalance, LocalDateTime startDate, LocalDateTime endDate,
-                                                    int totalSignals) {
+    /**
+     * Determine why a trade was closed based on configured parameters
+     */
+    private String determineExitReason(BacktestTrade trade, Position position, HistoricalCandle currentCandle) {
+        double pnlPercent = trade.getPnlPercent();
+        long durationHours = trade.getHoldingTimeHours();
+
+        // Check configured stop loss and take profit levels
+        if (pnlPercent <= -stopLossPercent) {
+            return "STOP_LOSS";
+        }
+        if (pnlPercent >= takeProfitPercent) {
+            return "TAKE_PROFIT";
+        }
+
+        // Check configured max holding time
+        if (durationHours >= maxHoldingHours) {
+            return "MAX_TIME";
+        }
+
+        // Default to signal reversal
+        return "SIGNAL_REVERSAL";
+    }
+
+    // Helper methods for data management
+    private boolean hasMinimumData(Map<String, List<HistoricalCandle>> data) {
+        return data.get("4h").size() >= 300 && data.get("1d").size() >= 200;
+    }
+
+    private List<HistoricalCandle> filterDataBeforeTime(List<HistoricalCandle> data, LocalDateTime cutoffTime) {
+        return data.stream()
+                .filter(candle -> candle.getTimestamp().isBefore(cutoffTime))
+                .collect(Collectors.toList());
+    }
+
+    private List<List<Object>> buildHistoricalKlines(List<HistoricalCandle> candles, int maxSize) {
+        if (candles.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        int startIndex = Math.max(0, candles.size() - maxSize);
+        return candles.subList(startIndex, candles.size()).stream()
+                .map(candle -> List.<Object>of(
+                        candle.getTimestamp().toEpochSecond(java.time.ZoneOffset.UTC) * 1000,
+                        candle.getOpen(),
+                        candle.getHigh(),
+                        candle.getLow(),
+                        candle.getClose(),
+                        candle.getVolume()
+                ))
+                .collect(Collectors.toList());
+    }
+
+    private BacktestResult calculateBacktestMetrics(String symbol, SwingAlgoBacktestResult swingResult,
+                                                    LocalDateTime startDate, LocalDateTime endDate) {
+        List<BacktestTrade> trades = swingResult.getTrades();
+        double finalBalance = swingResult.getFinalBalance();
+
         double totalReturnPercent = (finalBalance - initialBalance) / initialBalance * 100.0;
         long winningTrades = trades.stream().mapToLong(t -> t.getPnl() > 0 ? 1 : 0).sum();
         double winRate = trades.isEmpty() ? 0.0 : (double) winningTrades / trades.size() * 100.0;
 
         return BacktestResult.builder()
                 .symbol(symbol)
-                .timeframe(timeframe)
+                .timeframe("4h")
                 .startDate(startDate)
                 .endDate(endDate)
                 .initialBalance(initialBalance)
@@ -643,41 +686,18 @@ public class BacktestService {
                 .winRate(winRate)
                 .trades(trades)
                 .success(true)
-                .totalSignals(totalSignals)
+                .totalSignals(swingResult.getTotalAnalysisPoints())
+                .swingAlgoAnalysisPoints(swingResult.getAnalysisPoints()) // Add SwingAlgo data
                 .build();
     }
 
-    private double calculateFees(Position position, double price) {
-        return Math.abs(position.getPositionSize() * price * feeRate);
-    }
-
-    private double calculateUnrealizedPnl(Position position, double currentPrice) {
-        if (position.getSide() == Signal.LONG) {
-            return position.getPositionSize() * (currentPrice - position.getEntryPrice());
-        } else {
-            return position.getPositionSize() * (position.getEntryPrice() - currentPrice);
-        }
-    }
-
-    private Direction getPositionDirection(Position position) {
-        return position.getDirection() != null ? position.getDirection() :
-                (position.getSide() == Signal.LONG ? Direction.LONG : Direction.SHORT);
-    }
-
-    private Signal convertDirectionToSignal(Direction direction) {
-        return switch (direction) {
-            case LONG -> Signal.LONG;
-            case SHORT -> Signal.SHORT;
-            case HOLD -> Signal.NO_TRADE;
-        };
-    }
-
-    private BacktestResult createErrorResult(String symbol, String timeframe, String errorMessage) {
+    private BacktestResult createErrorResult(String symbol, String errorMessage) {
         return BacktestResult.builder()
                 .symbol(symbol)
-                .timeframe(timeframe)
+                .timeframe("4h")
                 .success(false)
                 .errorMessage(errorMessage)
                 .build();
     }
+
 }

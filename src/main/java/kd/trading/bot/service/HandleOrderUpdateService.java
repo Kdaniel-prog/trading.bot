@@ -289,23 +289,6 @@ public class HandleOrderUpdateService {
                     .isWinning(realizedProfit > 0)
                     .build();
 
-            // Send to ML service asynchronously
-            pythonMLService.submitTradeResult(tradeResult)
-                    .thenAccept(success -> {
-                        if (success) {
-                            log.info("🤖 ML feedback sent successfully for {} trade: {}% return",
-                                    symbol, percentReturn);
-                        } else {
-                            log.warn("🤖 ML feedback failed for {} trade", symbol);
-                        }
-                    })
-                    .handle((result, throwable) -> {
-                        if (throwable != null) {
-                            log.error("🤖 ML feedback error for {} trade: {}", symbol, throwable.getMessage());
-                        }
-                        return null; // handle() metódus esetén bármit visszaadhatsz
-                    });
-
         } catch (Exception e) {
             log.error("🤖 Error creating ML trade feedback for {}: {}", symbol, e.getMessage(), e);
         }

@@ -16,6 +16,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -64,7 +65,7 @@ public class SwingAlgoService {
             List<List<Object>> fourHourKlines = restClient.getKlines(symbol, "4h", 300);
             List<List<Object>> dailyKlines = restClient.getKlines(symbol, "1d", 200);
             List<List<Object>> hourlyKlines = restClient.getKlines(symbol, "1h", 100);
-            List<List<Object>> fifteenMinKlines = restClient.getKlines(symbol, "15m", 50);
+            List<List<Object>> fifteenMinKlines = restClient.getKlines(symbol, "30m", 50);
 
             if (fourHourKlines.size() < 100 || dailyKlines.size() < 50) {
                 return createNoTradeAnalysis(symbol, lastPrice, "Insufficient data");
@@ -77,16 +78,16 @@ public class SwingAlgoService {
             List<Double> volumes4h = extractVolumes(fourHourKlines);
             List<Double> closesDaily = extractCloses(dailyKlines);
             List<Double> closesHourly = extractCloses(hourlyKlines);
-            List<Double> closes15m = extractCloses(fifteenMinKlines);
-            List<Double> highs15m = extractHighs(fifteenMinKlines);
-            List<Double> lows15m = extractLows(fifteenMinKlines);
+            List<Double> closes30m = extractCloses(fifteenMinKlines);
+            List<Double> highs30m = extractHighs(fifteenMinKlines);
+            List<Double> lows30m = extractLows(fifteenMinKlines);
 
             double currentPrice = closes4h.get(closes4h.size() - 1);
 
             // === PURE TECHNICAL ANALYSIS - NO TRADING DECISIONS ===
             TechnicalIndicators indicators = calculateAllIndicators(
                     closes4h, highs4h, lows4h, volumes4h,
-                    closesDaily, closesHourly, closes15m, highs15m, lows15m, currentPrice
+                    closesDaily, closesHourly, closes30m, highs30m, lows30m, currentPrice
             );
 
             // Create comprehensive analysis object
@@ -101,103 +102,230 @@ public class SwingAlgoService {
         }
     }
 
-    /**
-     * Generate directional signals for backtesting/training
-     */
+    // Fix 1: Update generateBacktestDirectionalSignal method to generate more signals
     private Direction generateBacktestDirectionalSignal(TechnicalIndicators indicators) {
         double longScore = 0.0;
         double shortScore = 0.0;
-        double holdScore = 0.5; // Bias towards HOLD for conservative approach
-        double threshold = 2.5; // REDUCED from 3.5
+        double holdScore = 0.5;
+        double threshold = 2.0; // REDUCED from 2.5 to generate more signals
 
         // === TREND ANALYSIS ===
         if ("BULLISH".equals(indicators.getPrimaryTrend())) {
-            longScore += 2.5;
+            longScore += 2.0; // Reduced from 2.5
             if ("BULLISH".equals(indicators.getShortTermTrend())) {
-                longScore += 1.5; // Trend alignment
+                longScore += 1.0; // Reduced from 1.5
             }
         } else if ("BEARISH".equals(indicators.getPrimaryTrend())) {
-            shortScore += 2.5;
+            shortScore += 2.0; // Reduced from 2.5
             if ("BEARISH".equals(indicators.getShortTermTrend())) {
-                shortScore += 1.5; // Trend alignment
+                shortScore += 1.0; // Reduced from 1.5
             }
         }
 
         // === MOMENTUM ANALYSIS ===
         double rsi = indicators.getRsi();
 
-        // RSI oversold/overbought conditions
-        if (rsi < 35 && rsi > 25) {
-            longScore += 2.0; // Potential bounce
-        } else if (rsi > 65 && rsi < 75) {
-            shortScore += 2.0; // Potential reversal
+        // More aggressive RSI conditions
+        if (rsi < 40 && rsi > 20) { // Expanded from 35-25 to 40-20
+            longScore += 1.5; // Reduced from 2.0
+        } else if (rsi > 60 && rsi < 80) { // Expanded from 65-75 to 60-80
+            shortScore += 1.5; // Reduced from 2.0
         }
 
-        // RSI trend
-        if (indicators.isRsiRising() && rsi > 40) {
-            longScore += 1.0;
-        } else if (!indicators.isRsiRising() && rsi < 60) {
-            shortScore += 1.0;
+        // RSI trend - more lenient
+        if (indicators.isRsiRising() && rsi > 35) { // Reduced from 40
+            longScore += 0.8; // Reduced from 1.0
+        } else if (!indicators.isRsiRising() && rsi < 65) { // Increased from 60
+            shortScore += 0.8; // Reduced from 1.0
         }
 
-        // MACD signals
+        // MACD signals - more weight
         if (indicators.isMacdBullish() && indicators.getMacdHistogram() > 0) {
-            longScore += 1.5;
+            longScore += 2.0; // Increased from 1.5
         } else if (indicators.isMacdBearish() && indicators.getMacdHistogram() < 0) {
-            shortScore += 1.5;
+            shortScore += 2.0; // Increased from 1.5
         }
 
         // === VOLUME CONFIRMATION ===
-        if (indicators.getVolumeRatio() > 1.4) {
-            // Strong volume supports both directions
-            longScore += 1.0;
-            shortScore += 1.0;
-        } else if (indicators.getVolumeRatio() < 0.8) {
-            // Low volume - prefer HOLD
-            holdScore += 1.0;
+        if (indicators.getVolumeRatio() > 1.2) { // Reduced from 1.4
+            longScore += 0.8; // Reduced from 1.0
+            shortScore += 0.8; // Reduced from 1.0
+        } else if (indicators.getVolumeRatio() < 0.9) { // Increased from 0.8
+            holdScore += 0.5; // Reduced from 1.0
         }
 
         // === MARKET STRUCTURE ===
         if (indicators.isBullishStructure()) {
-            longScore += 1.5;
+            longScore += 1.2; // Reduced from 1.5
         } else if (indicators.isBearishStructure()) {
-            shortScore += 1.5;
+            shortScore += 1.2; // Reduced from 1.5
         } else if (indicators.isConsolidation()) {
-            holdScore += 1.5;
+            holdScore += 0.8; // Reduced from 1.5
         }
 
         // === RISK/REWARD ANALYSIS ===
-        if (indicators.getRiskRewardRatio() < 1.2) {
-            holdScore += 1.0; // Poor risk/reward
-        } else if (indicators.getRiskRewardRatio() > 2.0) {
-            // Good risk/reward supports current trend
+        if (indicators.getRiskRewardRatio() < 1.0) { // Reduced from 1.2
+            holdScore += 0.5; // Reduced from 1.0
+        } else if (indicators.getRiskRewardRatio() > 1.8) { // Reduced from 2.0
             if (longScore > shortScore) {
-                longScore += 1.0;
+                longScore += 0.8; // Reduced from 1.0
             } else if (shortScore > longScore) {
-                shortScore += 1.0;
+                shortScore += 0.8; // Reduced from 1.0
             }
         }
 
         // === VOLATILITY FILTER ===
-        if (indicators.getVolatilityPercent() > 8.0) {
-            holdScore += 0.5; // High volatility - be cautious
+        if (indicators.getVolatilityPercent() > 10.0) { // Increased from 8.0
+            holdScore += 0.3; // Reduced from 0.5
         }
 
-        // === DECISION LOGIC ===
+        // === DECISION LOGIC - MORE AGGRESSIVE ===
         double maxScore = Math.max(Math.max(longScore, shortScore), holdScore);
 
-        // Require clear winner with sufficient confidence
+        // Lower threshold for signal generation
         if (maxScore < threshold) {
             return Direction.HOLD;
         }
 
-        // Make it easier to generate LONG/SHORT signals
-        if (longScore >= 2.5 && longScore > shortScore + 0.3) {
+        // Easier to generate LONG/SHORT signals
+        if (longScore >= 2.0 && longScore > shortScore + 0.2) { // Reduced from 2.5 and 0.3
             return Direction.LONG;
-        } else if (shortScore >= 2.5 && shortScore > longScore + 0.3) {
-            return Direction.SHORT;
+        } else if (shortScore >= 2.0 && shortScore > longScore + 0.2) { // Reduced from 2.5 and 0.3
+            shortScore += 1.0;
+        }
+
+        return Direction.HOLD;
+    }
+
+    // Fix 2: Add debug logging to createSwingAlgoTrainingPoint in BacktestService
+    private SwingAlgoTrainingPoint createSwingAlgoTrainingPoint(CoinAnalysis swingAnalysis,
+                                                                HistoricalCandle currentCandle,
+                                                                LocalDateTime analysisTime) {
+
+        // DEBUG: Log the input analysis
+        log.debug("Creating training point - Symbol: {}, Signal: {}, Score: {}, Confidence: {}",
+                swingAnalysis.getSymbol(),
+                swingAnalysis.getSignal(),
+                swingAnalysis.getScore(),
+                swingAnalysis.getMlConfidence());
+
+        SwingAlgoTrainingPoint point = SwingAlgoTrainingPoint.builder()
+                .timestamp(analysisTime)
+                .symbol(swingAnalysis.getSymbol())
+                .price(currentCandle.getClose())
+                .swingAlgoSignal(Signal.valueOf(swingAnalysis.getSignal() != null ? swingAnalysis.getSignal().toString() : "NO_TRADE"))
+                .swingAlgoScore(swingAnalysis.getScore())
+                .swingAlgoConfidence(swingAnalysis.getMlConfidence())
+                .build();
+
+        // Extract ALL technical indicators from SwingAlgo
+        if (swingAnalysis.getTechnicalIndicators() != null) {
+            TechnicalIndicators indicators = swingAnalysis.getTechnicalIndicators();
+
+            log.debug("Technical indicators available - RSI: {}, EMA20: {}, EMA50: {}, Primary Trend: {}",
+                    indicators.getRsi(),
+                    indicators.getEma20_4h(),
+                    indicators.getEma50_4h(),
+                    indicators.getPrimaryTrend());
+
+            Map<String, Object> features = new HashMap<>();
+
+            // Add null checks for each feature
+            addFeatureIfNotNull(features, "rsi", indicators.getRsi());
+            addFeatureIfNotNull(features, "ema20_4h", indicators.getEma20_4h());
+            addFeatureIfNotNull(features, "ema50_4h", indicators.getEma50_4h());
+            addFeatureIfNotNull(features, "ema200_daily", indicators.getEma200_daily());
+            addFeatureIfNotNull(features, "primaryTrend", convertTrendToNumeric(indicators.getPrimaryTrend()));
+            addFeatureIfNotNull(features, "shortTermTrend", convertTrendToNumeric(indicators.getShortTermTrend()));
+            addFeatureIfNotNull(features, "trendAlignment", indicators.isTrendAlignment() ? 1.0 : 0.0);
+            addFeatureIfNotNull(features, "trendStrength", indicators.getTrendStrength());
+            addFeatureIfNotNull(features, "macdLine", indicators.getMacdLine());
+            addFeatureIfNotNull(features, "macdSignal", indicators.getMacdSignal());
+            addFeatureIfNotNull(features, "macdHistogram", indicators.getMacdHistogram());
+            addFeatureIfNotNull(features, "macdBullish", indicators.isMacdBullish() ? 1.0 : 0.0);
+            addFeatureIfNotNull(features, "macdBearish", indicators.isMacdBearish() ? 1.0 : 0.0);
+            addFeatureIfNotNull(features, "volumeRatio", indicators.getVolumeRatio());
+            addFeatureIfNotNull(features, "strongVolume", indicators.isStrongVolume() ? 1.0 : 0.0);
+            addFeatureIfNotNull(features, "atr", indicators.getAtr());
+            addFeatureIfNotNull(features, "volatilityPercent", indicators.getVolatilityPercent());
+            addFeatureIfNotNull(features, "riskRewardRatio", indicators.getRiskRewardRatio());
+            addFeatureIfNotNull(features, "nearestSupport", indicators.getNearestSupport());
+            addFeatureIfNotNull(features, "nearestResistance", indicators.getNearestResistance());
+            addFeatureIfNotNull(features, "bullishStructure", indicators.isBullishStructure() ? 1.0 : 0.0);
+            addFeatureIfNotNull(features, "bearishStructure", indicators.isBearishStructure() ? 1.0 : 0.0);
+            addFeatureIfNotNull(features, "consolidation", indicators.isConsolidation() ? 1.0 : 0.0);
+
+            /// Add derived features with safe null checks
+            Double ema20 = indicators.getEma20_4h();
+            Double ema50 = indicators.getEma50_4h();
+            Double rsi   = indicators.getRsi();
+            Double vol   = indicators.getVolumeRatio();
+
+            if (ema20 != null && ema20 > 0) {
+                features.put("price_vs_ema20", currentCandle.getClose() / ema20);
+            }
+
+            if (ema50 != null && ema50 > 0) {
+                features.put("price_vs_ema50", currentCandle.getClose() / ema50);
+            }
+
+            if (ema20 != null && ema50 != null && ema50 > 0) {
+                features.put("ema_alignment", ema20 > ema50 ? 1.0 : 0.0);
+            }
+
+            if (rsi != null) {
+                features.put("rsi_oversold", rsi < 30 ? 1.0 : 0.0);
+                features.put("rsi_overbought", rsi > 70 ? 1.0 : 0.0);
+            }
+
+            if (vol != null) {
+                features.put("high_volume", vol > 1.5 ? 1.0 : 0.0);
+            }
+
+            point.setSwingAlgoFeatures(features);
+
+            log.debug("Created training point with {} features: {}", features.size(), features.keySet());
         } else {
-            return Direction.HOLD;
+            log.warn("No technical indicators found in SwingAnalysis for {}", swingAnalysis.getSymbol());
+        }
+
+        return point;
+    }
+    // Helper method for safe feature addition
+    private void addFeatureIfNotNull(Map<String, Object> features, String key, Object value) {
+        if (value != null) {
+            if (value instanceof Boolean) {
+                features.put(key, ((Boolean) value) ? 1.0 : 0.0);
+            } else {
+                features.put(key, value);
+            }
+        }
+    }
+
+    // Helper method to convert trend strings to numeric values
+    private double convertTrendToNumeric(String trend) {
+        if (trend == null) return 0.0;
+        return switch (trend) {
+            case "BULLISH" -> 1.0;
+            case "BEARISH" -> -1.0;
+            default -> 0.0;
+        };
+    }
+
+    // Fix 3: Update the shouldOpenPositionFromSwingAlgo method to be less restrictive
+    private boolean shouldOpenPositionFromSwingAlgo(CoinAnalysis analysis) {
+        return analysis.getSignal() != Signal.NO_TRADE &&
+                analysis.getScore() >= 4.0 &&  // Reduced from 5.0
+                analysis.getMlConfidence() >= 0.5;  // Reduced from 0.6
+    }
+
+    // Fix 4: Add validation method to check signal conversion
+    private void validateSignalConversion(CoinAnalysis analysis) {
+        if (analysis.getSignal() == null) {
+            log.error("Signal is NULL for analysis: {}", analysis.getSymbol());
+        } else {
+            log.debug("Signal conversion successful: {} -> {}",
+                    analysis.getDirection(), analysis.getSignal());
         }
     }
 
@@ -279,8 +407,8 @@ public class SwingAlgoService {
     private TechnicalIndicators calculateAllIndicators(List<Double> closes4h, List<Double> highs4h,
                                                        List<Double> lows4h, List<Double> volumes4h,
                                                        List<Double> closesDaily, List<Double> closesHourly,
-                                                       List<Double> closes15m, List<Double> highs15m,
-                                                       List<Double> lows15m, double currentPrice) {
+                                                       List<Double> closes30m, List<Double> highs30m,
+                                                       List<Double> lows30m, double currentPrice) {
 
         TechnicalIndicators indicators = new TechnicalIndicators();
         indicators.setCurrentPrice(currentPrice);
@@ -832,9 +960,9 @@ public class SwingAlgoService {
         mlData.put("rsiMomentumScore", calculateRsiMomentumScore(indicators));
 
         // === VOLUME FEATURES ===
-        double currentVolume = safeDouble(indicators.getCurrentVolume(), 0.0);
-        double averageVolume20 = safeDouble(indicators.getAverageVolume20(), 1.0);
-        double volumeRatio = safeDouble(indicators.getVolumeRatio(), 1.0);
+        double currentVolume = indicators.getCurrentVolume();
+        double averageVolume20 = indicators.getAverageVolume20();
+        double volumeRatio = indicators.getVolumeRatio();
 
         mlData.put("currentVolume", currentVolume);
         mlData.put("averageVolume20", averageVolume20);
@@ -1000,7 +1128,7 @@ public class SwingAlgoService {
             TechnicalIndicators indicators = calculateAllIndicators(
                     closes4h, highs4h, lows4h, volumes4h,
                     closesDaily, closesHourly,
-                    closes4h, highs4h, lows4h, // Use 4h for 15m approximation
+                    closes4h, highs4h, lows4h, // Use 4h for 30m approximation
                     currentPrice
             );
 

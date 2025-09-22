@@ -99,7 +99,7 @@ class TradingModelTrainer:
         logging.getLogger().info(f"TradingModelTrainer initialized; models => {self.model_dir}")
 
     # ---------------------------- I/O & Loading ----------------------------
-    def load_training_data(self, training_file_pattern: str = "training_data_*.json") -> List[dict]:
+    def load_training_data(self, training_file_pattern: str = "swingalgo_training_data_*.json") -> List[dict]:
         # try main training dir, then some fallbacks
         training_files = list(self.training_dir.glob(training_file_pattern))
         if not training_files:
